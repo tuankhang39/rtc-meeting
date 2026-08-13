@@ -1,0 +1,162 @@
+import { useState, type FormEvent } from 'react'
+import { isFirebaseConfigured } from '../lib/firebase'
+import { isHostLoggedIn, loginHost, logoutHost } from '../lib/hostAuth'
+import { randomId } from '../lib/webrtc'
+
+type Props = {
+  initialRoomId?: string
+  onJoin: (roomId: string, name: string) => void
+}
+
+export function Lobby({ initialRoomId = '', onJoin }: Props) {
+  const [name, setName] = useState(() => localStorage.getItem('rtc-name') ?? '')
+  const [roomId, setRoomId] = useState(initialRoomId)
+  const [hostOk, setHostOk] = useState(() => isHostLoggedIn())
+  const [showLogin, setShowLogin] = useState(false)
+  const [user, setUser] = useState('')
+  const [pass, setPass] = useState('')
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const configured = isFirebaseConfigured()
+
+  const enterRoom = (id: string) => {
+    const display = name.trim() || `Guest-${randomId(3)}`
+    localStorage.setItem('rtc-name', display)
+    onJoin(id, display)
+  }
+
+  const joinExisting = (e: FormEvent) => {
+    e.preventDefault()
+    if (!configured) return
+    const id = roomId.trim().toLowerCase()
+    if (!id) return
+    enterRoom(id)
+  }
+
+  const createRoom = () => {
+    if (!configured) return
+    if (!hostOk) {
+      setShowLogin(true)
+      setLoginError(null)
+      return
+    }
+    enterRoom(randomId(6))
+  }
+
+  const onLogin = (e: FormEvent) => {
+    e.preventDefault()
+    if (loginHost(user, pass)) {
+      setHostOk(true)
+      setShowLogin(false)
+      setLoginError(null)
+      setPass('')
+      enterRoom(randomId(6))
+    } else {
+      setLoginError('Sai username hoặc mật khẩu')
+    }
+  }
+
+  return (
+    <div className="lobby">
+      <div className="lobby-card">
+        <span className="card-sticker card-sticker-l">🍓</span>
+        <span className="card-sticker card-sticker-r">🧸</span>
+        <p className="eyebrow">Cute call · pink room</p>
+        <h1 className="brand-hero">RTC</h1>
+        <p className="lede">Họp video 2–3 người. Ai cũng vào được bằng Room ID — tạo phòng cần đăng nhập host.</p>
+
+        {!configured && (
+          <div className="banner warn">
+            Chưa cấu hình Firebase. Copy <code>.env.example</code> → <code>.env</code> rồi chạy lại{' '}
+            <code>npm run dev</code>.
+          </div>
+        )}
+
+        {hostOk && (
+          <div className="banner ok host-bar">
+            <span>Đã đăng nhập host</span>
+            <button
+              type="button"
+              className="btn ghost tiny"
+              onClick={() => {
+                logoutHost()
+                setHostOk(false)
+              }}
+            >
+              Đăng xuất
+            </button>
+          </div>
+        )}
+
+        <form className="lobby-form" onSubmit={joinExisting}>
+          <label>
+            Tên của bạn
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Bé Mèo"
+              maxLength={40}
+            />
+          </label>
+          <label>
+            Room ID (để vào phòng có sẵn)
+            <input
+              value={roomId}
+              onChange={(e) => setRoomId(e.target.value)}
+              placeholder="abc123"
+              maxLength={24}
+            />
+          </label>
+          <div className="lobby-actions">
+            <button type="submit" className="btn primary" disabled={!configured || !roomId.trim()}>
+              Vào phòng
+            </button>
+            <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
+              {hostOk ? 'Tạo phòng mới' : 'Đăng nhập để tạo phòng'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {showLogin && (
+        <div className="modal-backdrop" onClick={() => setShowLogin(false)}>
+          <form
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={onLogin}
+          >
+            <p className="eyebrow">Host only</p>
+            <h2>Đăng nhập tạo phòng</h2>
+            <label>
+              Username
+              <input
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                placeholder="admin"
+                autoComplete="username"
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+                placeholder="••••••"
+                autoComplete="current-password"
+              />
+            </label>
+            {loginError && <p className="login-error">{loginError}</p>}
+            <div className="lobby-actions">
+              <button type="submit" className="btn primary">
+                Đăng nhập & tạo
+              </button>
+              <button type="button" className="btn" onClick={() => setShowLogin(false)}>
+                Hủy
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": true,
+        ".write": true,
+        "participants": {
+          "$uid": {
+            ".validate": "newData.hasChildren(['name', 'joinedAt', 'mic', 'camera'])"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+:root {
+  --bg0: #f6eef2;
+  --bg1: #f0e4ea;
+  --bg2: #e8d5df;
+  --line: rgba(150, 80, 110, 0.16);
+  --text: #4a3040;
+  --muted: #8f6a7c;
+  --accent: #d889a6;
+  --accent-2: #c99bb0;
+  --accent-deep: #b56b88;
+  --danger: #c96b7e;
+  --ok: #c99bb0;
+  --radius: 18px;
+  font-family: 'Nunito', 'Outfit', 'Segoe UI', sans-serif;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg0);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(700px 420px at 8% -5%, rgba(200, 150, 170, 0.22), transparent 58%),
+    radial-gradient(620px 380px at 100% 0%, rgba(180, 120, 145, 0.14), transparent 55%),
+    radial-gradient(500px 300px at 50% 100%, rgba(190, 150, 170, 0.16), transparent 50%),
+    linear-gradient(165deg, #f7f0f3, #f0e6ec 48%, #eadde5);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+code {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.9em;
+}
