@@ -141,6 +141,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const screenSharingRef = useRef(false)
   const stopScreenShareRef = useRef<() => Promise<void>>(async () => {})
   const applyMicRef = useRef<(on: boolean) => Promise<void>>(async () => {})
+  const renegotiateAllRef = useRef<() => void>(() => {})
   screenSharingRef.current = screenSharing
   const participantsRef = useRef<Record<string, Participant>>({})
   const displayNameRef = useRef(displayName)
@@ -157,6 +158,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       const already = pc.getSenders().some((s) => s.track?.id === track.id)
       if (!already) pc.addTrack(track, screen)
     }
+    // addTrack không đủ — phải gửi offer mới, kể cả phía không phải offerer ban đầu
+    renegotiateAllRef.current()
   }, [])
 
   const unpublishScreenTrack = useCallback(() => {
@@ -172,6 +175,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     screenTrackRef.current = null
     screenStreamRef.current = null
     setScreenStream(null)
+    renegotiateAllRef.current()
   }, [])
 
   const removeRemote = useCallback((peerId: string) => {
@@ -266,7 +270,12 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
             continue
           }
           const sid = m.streamByTrack.get(t.id)
-          const toScreen = t.kind === 'video' && Boolean(cameraSid && sid && sid !== cameraSid)
+          const camAlreadyHasVideo = m.camera
+            .getVideoTracks()
+            .some((x) => x.id !== t.id && x.readyState !== 'ended')
+          const toScreen =
+            t.kind === 'video' &&
+            (Boolean(cameraSid && sid && sid !== cameraSid) || camAlreadyHasVideo)
           const dest = toScreen ? m.screen : m.camera
           const other = dest === m.screen ? m.camera : m.screen
           if (other.getTracks().some((x) => x.id === t.id)) other.removeTrack(t)
@@ -296,10 +305,12 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     const isOfferer = (peerId: string) => userId > peerId
 
     const startOffer = async (peerId: string) => {
-      if (!isOfferer(peerId)) return
       const pc = pcsRef.current.get(peerId)
       if (!pc || pc.signalingState !== 'stable') return
       if (makingOfferRef.current.get(peerId)) return
+      // Lần đầu chỉ 1 phía offer. Sau khi đã nối, cả hai được offer (share màn hình).
+      const alreadyNegotiated = Boolean(pc.currentRemoteDescription ?? pc.remoteDescription)
+      if (!alreadyNegotiated && !isOfferer(peerId)) return
       makingOfferRef.current.set(peerId, true)
       try {
         await pc.setLocalDescription(
@@ -368,6 +379,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       void startOffer(peerId)
       listenPeerSignals(peerId)
       return pc
+    }
+
+    renegotiateAllRef.current = () => {
+      for (const id of pcsRef.current.keys()) void startOffer(id)
     }
 
     const handleSignal = async (from: string, payload: SignalPayload) => {
@@ -770,6 +785,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
     return () => {
       cancelled = true
+      renegotiateAllRef.current = () => {}
       for (const c of cleanups) c()
       for (const pc of pcsRef.current.values()) pc.close()
       pcsRef.current.clear()
