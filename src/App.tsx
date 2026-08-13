@@ -3,6 +3,7 @@ import { CuteStickers } from './components/CuteStickers'
 import { AdminDashboard } from './components/AdminDashboard'
 import { Lobby } from './components/Lobby'
 import { Room } from './components/Room'
+import { disconnectDb } from './lib/firebase'
 import { randomId } from './lib/webrtc'
 import './App.css'
 
@@ -27,8 +28,13 @@ export default function App() {
 
   useEffect(() => {
     const onPop = () => setPath(readPath())
+    const onHide = () => disconnectDb()
     window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      window.removeEventListener('pagehide', onHide)
+    }
   }, [])
 
   const joinRoom = (roomId: string, name: string, asHost: boolean) => {

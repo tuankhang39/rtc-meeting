@@ -11,7 +11,7 @@ import {
   set,
   update,
 } from 'firebase/database'
-import { getDb } from '../lib/firebase'
+import { getDb, connectDb, disconnectDb } from '../lib/firebase'
 import { acquireLocalMedia, acquireScreenShare, explainMediaError, explainScreenShareError } from '../lib/media'
 import {
   buildPlayfulPayload,
@@ -186,11 +186,22 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     let cancelled = false
     const cleanups: Array<() => void> = []
     const signalUnsubs = new Map<string, () => void>()
-    const db = getDb()
+    const db = connectDb('room')
 
     const descInit = (desc: RTCSessionDescription | null): RTCSessionDescriptionInit => {
       if (!desc) throw new Error('missing session description')
       return { type: desc.type, sdp: desc.sdp }
+    }
+
+    const listenPeerSignals = (from: string) => {
+      if (!from || from === userId || signalUnsubs.has(from)) return
+      const unsubMsgs = onChildAdded(ref(db, `rooms/${roomId}/signals/${userId}/${from}`), async (msgSnap) => {
+        const payload = msgSnap.val() as SignalPayload & { createdAt?: number }
+        if (!payload?.type) return
+        await enqueueSignal(from, payload)
+        void remove(msgSnap.ref)
+      })
+      signalUnsubs.set(from, unsubMsgs)
     }
 
     const sendSignal = async (to: string, payload: SignalPayload) => {
@@ -281,22 +292,38 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       }
     }
 
+    /** Chỉ 1 phía gửi offer (id lớn hơn) — tránh glare khi người 2 và 3 cùng nối. */
+    const isOfferer = (peerId: string) => userId > peerId
+
+    const startOffer = async (peerId: string) => {
+      if (!isOfferer(peerId)) return
+      const pc = pcsRef.current.get(peerId)
+      if (!pc || pc.signalingState !== 'stable') return
+      if (makingOfferRef.current.get(peerId)) return
+      makingOfferRef.current.set(peerId, true)
+      try {
+        await pc.setLocalDescription(
+          await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true }),
+        )
+        const local = pc.localDescription
+        if (!local) return
+        await sendSignal(peerId, {
+          type: 'offer',
+          sdp: descInit(local),
+        })
+      } catch (e) {
+        console.error('startOffer', e)
+      } finally {
+        makingOfferRef.current.set(peerId, false)
+      }
+    }
+
     const ensurePeer = (peerId: string) => {
       const existing = pcsRef.current.get(peerId)
       if (existing) return existing
 
       const pc = createPeerConnection()
       pcsRef.current.set(peerId, pc)
-
-      const stream = localStreamRef.current
-      if (stream) {
-        for (const t of stream.getTracks()) {
-          pc.addTrack(t, stream)
-        }
-      }
-      if (screenTrackRef.current && screenStreamRef.current) {
-        pc.addTrack(screenTrackRef.current, screenStreamRef.current)
-      }
 
       pc.ontrack = (ev) => attachIncomingTrack(peerId, ev)
 
@@ -309,28 +336,15 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         }
       }
 
-      pc.onnegotiationneeded = async () => {
-        try {
-          makingOfferRef.current.set(peerId, true)
-          if (pc.signalingState !== 'stable') return
-          await pc.setLocalDescription(await pc.createOffer())
-          const local = pc.localDescription
-          if (!local) return
-          await sendSignal(peerId, {
-            type: 'offer',
-            sdp: descInit(local),
-          })
-        } catch (e) {
-          console.error('negotiationneeded', e)
-        } finally {
-          makingOfferRef.current.set(peerId, false)
-        }
+      pc.onnegotiationneeded = () => {
+        void startOffer(peerId)
       }
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed') {
           try {
             pc.restartIce()
+            void startOffer(peerId)
           } catch (e) {
             console.error('restartIce', e)
           }
@@ -341,12 +355,23 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         }
       }
 
+      const stream = localStreamRef.current
+      if (stream) {
+        for (const t of stream.getTracks()) {
+          pc.addTrack(t, stream)
+        }
+      }
+      if (screenTrackRef.current && screenStreamRef.current) {
+        pc.addTrack(screenTrackRef.current, screenStreamRef.current)
+      }
+
+      void startOffer(peerId)
+      listenPeerSignals(peerId)
       return pc
     }
 
     const handleSignal = async (from: string, payload: SignalPayload) => {
-      // userId so sánh lexicographic — luôn 1 polite / 1 impolite, không phụ thuộc joinedAt (dễ 0 khi signal tới trước).
-      const polite = userId < from
+      const polite = !isOfferer(from)
       const pc = ensurePeer(from)
 
       try {
@@ -365,6 +390,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           }
 
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
+          ignoreOfferRef.current.set(from, false)
           await flushIce(from, pc)
           await pc.setLocalDescription(await pc.createAnswer())
           await sendSignal(from, {
@@ -374,6 +400,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         } else if (payload.type === 'answer') {
           if (pc.signalingState !== 'have-local-offer') return
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
+          ignoreOfferRef.current.set(from, false)
           await flushIce(from, pc)
         } else if (payload.type === 'candidate') {
           if (!pc.remoteDescription) {
@@ -433,11 +460,112 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         }
 
         const meRef = ref(db, `rooms/${roomId}/participants/${userId}`)
+
+        const unsubSignals = onChildAdded(ref(db, `rooms/${roomId}/signals/${userId}`), (fromSnap) => {
+          const from = fromSnap.key
+          if (from) listenPeerSignals(from)
+        })
+        cleanups.push(() => {
+          unsubSignals()
+          for (const u of signalUnsubs.values()) u()
+          signalUnsubs.clear()
+        })
+
+        const unsubParticipants = onValue(ref(db, `rooms/${roomId}/participants`), (snap) => {
+          const val = (snap.val() as Record<string, Participant> | null) ?? {}
+          participantsRef.current = val
+          setParticipants(val)
+
+          setRemotes((prev) =>
+            prev.map((r) => {
+              const meta = val[r.userId]
+              if (!meta) return r
+              const sharing = meta.sharing ?? false
+              return {
+                ...r,
+                name: meta.name,
+                mic: meta.mic,
+                camera: meta.camera,
+                sharing,
+                screenStream: sharing ? r.screenStream : null,
+              }
+            }),
+          )
+
+          if (!val[userId]) return
+
+          for (const peerId of Object.keys(val)) {
+            if (peerId === userId) continue
+            ensurePeer(peerId)
+          }
+
+          for (const peerId of [...pcsRef.current.keys()]) {
+            if (!val[peerId]) {
+              pcsRef.current.get(peerId)?.close()
+              pcsRef.current.delete(peerId)
+              removeRemote(peerId)
+            }
+          }
+        })
+        cleanups.push(() => unsubParticipants())
+
         await set(meRef, me)
         await set(ref(db, `rooms/${roomId}/stars/${userId}`), { count: 0, name: me.name })
-        await onDisconnect(meRef).remove()
-        await onDisconnect(ref(db, `rooms/${roomId}/signals/${userId}`)).remove()
-        await onDisconnect(ref(db, `rooms/${roomId}/moderation/${userId}`)).remove()
+
+        const signalsRef = ref(db, `rooms/${roomId}/signals/${userId}`)
+        const modRef = ref(db, `rooms/${roomId}/moderation/${userId}`)
+
+        const armDisconnect = async () => {
+          await onDisconnect(meRef).remove()
+          await onDisconnect(signalsRef).remove()
+          await onDisconnect(modRef).remove()
+        }
+
+        const writePresence = () =>
+          set(meRef, {
+            name: displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`,
+            mic: localStreamRef.current?.getAudioTracks().some((t) => t.enabled) ?? me.mic,
+            camera: Boolean(cameraTrackRef.current && cameraTrackRef.current.readyState === 'live'),
+            sharing: screenSharingRef.current,
+            isHost: isHostRef.current,
+            joinedAt: me.joinedAt,
+          })
+
+        await armDisconnect()
+
+        const unsubConnected = onValue(ref(db, '.info/connected'), async (snap) => {
+          if (cancelled || snap.val() !== true) return
+          try {
+            await armDisconnect()
+            await writePresence()
+          } catch (e) {
+            console.error('armDisconnect', e)
+          }
+        })
+        cleanups.push(() => unsubConnected())
+
+        const hangUp = () => {
+          for (const pc of pcsRef.current.values()) {
+            try {
+              pc.close()
+            } catch {
+              /* ignore */
+            }
+          }
+          pcsRef.current.clear()
+          localStreamRef.current?.getTracks().forEach((t) => t.stop())
+          screenTrackRef.current?.stop()
+          void remove(meRef)
+          void remove(signalsRef)
+          void remove(modRef)
+          disconnectDb()
+        }
+        window.addEventListener('pagehide', hangUp)
+        window.addEventListener('beforeunload', hangUp)
+        cleanups.push(() => {
+          window.removeEventListener('pagehide', hangUp)
+          window.removeEventListener('beforeunload', hangUp)
+        })
 
         const metaSnap = await get(ref(db, `rooms/${roomId}/meta`))
         const existingMeta = (metaSnap.val() as {
@@ -479,62 +607,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           if (name) setRoomName(name)
         })
         cleanups.push(() => unsubMeta())
-
-        const unsubParticipants = onValue(ref(db, `rooms/${roomId}/participants`), (snap) => {
-          const val = (snap.val() as Record<string, Participant> | null) ?? {}
-          participantsRef.current = val
-          setParticipants(val)
-
-          setRemotes((prev) =>
-            prev.map((r) => {
-              const meta = val[r.userId]
-              if (!meta) return r
-              const sharing = meta.sharing ?? false
-              return {
-                ...r,
-                name: meta.name,
-                mic: meta.mic,
-                camera: meta.camera,
-                sharing,
-                screenStream: sharing ? r.screenStream : null,
-              }
-            }),
-          )
-
-          const myJoined = val[userId]?.joinedAt
-          if (!myJoined) return
-
-          for (const peerId of Object.keys(val)) {
-            if (peerId === userId) continue
-            ensurePeer(peerId)
-          }
-
-          for (const peerId of [...pcsRef.current.keys()]) {
-            if (!val[peerId]) {
-              pcsRef.current.get(peerId)?.close()
-              pcsRef.current.delete(peerId)
-              removeRemote(peerId)
-            }
-          }
-        })
-        cleanups.push(() => unsubParticipants())
-
-        const unsubSignals = onChildAdded(ref(db, `rooms/${roomId}/signals/${userId}`), (fromSnap) => {
-          const from = fromSnap.key
-          if (!from || signalUnsubs.has(from)) return
-          const unsubMsgs = onChildAdded(fromSnap.ref, async (msgSnap) => {
-            const payload = msgSnap.val() as SignalPayload & { createdAt?: number }
-            if (!payload?.type) return
-            await enqueueSignal(from, payload)
-            void remove(msgSnap.ref)
-          })
-          signalUnsubs.set(from, unsubMsgs)
-        })
-        cleanups.push(() => {
-          unsubSignals()
-          for (const u of signalUnsubs.values()) u()
-          signalUnsubs.clear()
-        })
 
         const unsubChat = onChildAdded(ref(db, `rooms/${roomId}/chat`), (snap) => {
           const val = snap.val() as Omit<ChatMessage, 'id'> | null
@@ -711,9 +783,9 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       screenTrackRef.current = null
       screenStreamRef.current = null
       cameraTrackRef.current = null
-      void remove(ref(db, `rooms/${roomId}/participants/${userId}`)).then(() => {
-        void markRoomEmptyIfNeeded(roomId)
-      })
+      void remove(ref(db, `rooms/${roomId}/participants/${userId}`))
+        .then(() => markRoomEmptyIfNeeded(roomId))
+        .finally(() => disconnectDb())
       void remove(ref(db, `rooms/${roomId}/signals/${userId}`))
       void remove(ref(db, `rooms/${roomId}/moderation/${userId}`))
     }
@@ -952,6 +1024,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     await remove(ref(getDb(), `rooms/${roomId}/signals/${userId}`))
     await remove(ref(getDb(), `rooms/${roomId}/moderation/${userId}`))
     await markRoomEmptyIfNeeded(roomId)
+    disconnectDb()
   }, [roomId, unpublishScreenTrack, userId])
 
   return {

@@ -14,6 +14,10 @@
     "roomIndex": {
       ".read": true,
       ".write": true
+    },
+    "appPresence": {
+      ".read": true,
+      ".write": true
     }
   }
 }

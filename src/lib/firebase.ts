@@ -1,5 +1,6 @@
 import { type FirebaseApp, initializeApp } from 'firebase/app'
-import { type Database, getDatabase } from 'firebase/database'
+import { type Database, getDatabase, goOffline, goOnline, onDisconnect, ref, remove, set } from 'firebase/database'
+import { randomId } from './webrtc'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -22,6 +23,7 @@ export function isFirebaseConfigured() {
 
 let app: FirebaseApp | null = null
 let database: Database | null = null
+let presenceId: string | null = null
 
 export function getDb(): Database {
   if (!isFirebaseConfigured()) {
@@ -32,4 +34,36 @@ export function getDb(): Database {
     database = getDatabase(app)
   }
   return database
+}
+
+async function markPresence(page: string) {
+  const db = getDb()
+  if (!presenceId) presenceId = randomId(10)
+  const presenceRef = ref(db, `appPresence/${presenceId}`)
+  await set(presenceRef, { page, at: Date.now() })
+  await onDisconnect(presenceRef).remove()
+}
+
+export function connectDb(page = 'app'): Database {
+  const db = getDb()
+  try {
+    goOnline(db)
+  } catch {
+    /* already online */
+  }
+  void markPresence(page).catch(() => {})
+  return db
+}
+
+export function disconnectDb() {
+  if (!database) return
+  if (presenceId) {
+    void remove(ref(database, `appPresence/${presenceId}`))
+    presenceId = null
+  }
+  try {
+    goOffline(database)
+  } catch {
+    /* ignore */
+  }
 }

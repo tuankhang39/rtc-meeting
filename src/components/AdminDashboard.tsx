@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { BRAND_SHORT } from '../lib/brand'
-import { isFirebaseConfigured } from '../lib/firebase'
+import { connectDb, disconnectDb, isFirebaseConfigured } from '../lib/firebase'
 import { isHostLoggedIn, loginHost, logoutHost } from '../lib/hostAuth'
 import {
   createPreparedRoom,
@@ -49,6 +49,7 @@ export function AdminDashboard({ onOpenRoom, onBack }: Props) {
 
   useEffect(() => {
     if (!configured || !hostOk) return
+    connectDb('admin')
     void sweepEmptyRooms().catch(() => {})
     const unsub = listenRoomIndex(setRooms)
     const tick = window.setInterval(() => {
@@ -57,6 +58,7 @@ export function AdminDashboard({ onOpenRoom, onBack }: Props) {
     return () => {
       unsub()
       window.clearInterval(tick)
+      disconnectDb()
     }
   }, [configured, hostOk])
 
