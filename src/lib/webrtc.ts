@@ -9,7 +9,7 @@ export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ]
 
-export const MAX_PARTICIPANTS = 3
+export const MAX_PARTICIPANTS = 5
 
 /** Chế độ miễn phí: cấm mọi URL turn:/turns: */
 export function createPeerConnection() {

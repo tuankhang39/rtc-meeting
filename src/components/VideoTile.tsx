@@ -20,6 +20,10 @@ type Props = {
   /** Host can mute this participant */
   canMute?: boolean
   onMute?: () => void
+  stars?: number
+  canStar?: boolean
+  onStar?: () => void
+  starBurst?: boolean
   playfulEffects?: PlayfulEffect[]
 }
 
@@ -38,17 +42,31 @@ export function VideoTile({
   compact = false,
   canMute = false,
   onMute,
+  stars = 0,
+  canStar = false,
+  onStar,
+  starBurst = false,
   playfulEffects = [],
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const speakFrom = audioStream ?? stream
   const speaking = useSpeaking(speakFrom, micOn)
 
   useEffect(() => {
     const el = videoRef.current
-    if (!el || el.srcObject === stream) return
-    el.srcObject = stream
+    if (!el) return
+    if (el.srcObject !== stream) el.srcObject = stream
+    if (stream) void el.play().catch(() => {})
   }, [stream])
+
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    const src = muted ? null : (audioStream ?? stream)
+    if (el.srcObject !== src) el.srcObject = src
+    if (src) void el.play().catch(() => {})
+  }, [audioStream, muted, stream])
 
   const showVideo = sharing || camOn
 
@@ -75,10 +93,11 @@ export function VideoTile({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={muted}
+          muted
           className={`${mirror && !sharing ? 'mirror' : ''} fit-${fit}`}
           style={{ opacity: showVideo ? 1 : 0 }}
         />
+        {!muted && <audio ref={audioRef} autoPlay />}
         {!showVideo && <div className="tile-avatar">{label.slice(0, 1).toUpperCase()}</div>}
       </div>
 
@@ -86,19 +105,41 @@ export function VideoTile({
 
       {isHostUser && <span className="host-badge">Host</span>}
 
-      {canMute && micOn && (
-        <button
-          type="button"
-          className="tile-mute-btn"
-          title="Tắt mic người này"
-          aria-label={`Tắt mic ${label}`}
-          onClick={(e) => {
-            e.stopPropagation()
-            onMute?.()
-          }}
-        >
-          <IconMicOff size={16} />
-        </button>
+      <div className="tile-actions">
+        {canStar && (
+          <button
+            type="button"
+            className="tile-star-btn"
+            title={`Tặng sao cho ${label}`}
+            aria-label={`Tặng sao ${label}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onStar?.()
+            }}
+          >
+            ⭐
+          </button>
+        )}
+        {canMute && micOn && (
+          <button
+            type="button"
+            className="tile-mute-btn"
+            title="Tắt mic người này"
+            aria-label={`Tắt mic ${label}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onMute?.()
+            }}
+          >
+            <IconMicOff size={16} />
+          </button>
+        )}
+      </div>
+
+      {starBurst && (
+        <div className="star-burst" aria-hidden>
+          ⭐
+        </div>
       )}
 
       <div className="tile-meta">
@@ -106,6 +147,9 @@ export function VideoTile({
           {label}
           {self ? ' (bạn)' : ''}
           {sharing ? ' · đang share' : ''}
+        </span>
+        <span className="tile-star-count" title={`${stars} sao`}>
+          ⭐ {stars}
         </span>
         <span className={`dot ${micOn ? (speaking ? 'speak' : 'on') : 'off'}`} title={micOn ? 'Mic on' : 'Mic off'} />
       </div>

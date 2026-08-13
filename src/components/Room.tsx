@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { BRAND_SHORT } from '../lib/brand'
 import { useRoom } from '../hooks/useRoom'
 import { MAX_PARTICIPANTS } from '../lib/webrtc'
@@ -21,6 +21,8 @@ import { PlayfulPicker } from './PlayfulInteractions'
 import { ScreenStickerOverlay, StickerPackPicker } from './ScreenStickers'
 import { ThemeToggle } from './ThemeToggle'
 import { VideoTile } from './VideoTile'
+import { StarBoard } from './StarBoard'
+import { useTeachPip } from '../hooks/useTeachPip'
 import type { StickerPackId } from '../lib/stickers'
 
 type Props = {
@@ -44,6 +46,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     mediaWarning,
     screenSharing,
     isHost,
+    roomName,
     hostNotice,
     joinToast,
     reactions,
@@ -51,6 +54,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     playfulByUser,
     playfulToast,
     quickCommentToast,
+    starScores,
+    starFxByUser,
     toggleMic,
     toggleCam,
     toggleScreenShare,
@@ -58,6 +63,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     sendChat,
     sendReaction,
     sendPlayful,
+    giveStar,
     sendQuickComment,
     placeScreenSticker,
     removeScreenSticker,
@@ -75,6 +81,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   const [showStickerPanel, setShowStickerPanel] = useState(false)
   const [showPlayfulPanel, setShowPlayfulPanel] = useState(false)
   const [showQuickComments, setShowQuickComments] = useState(false)
+  const [showChat, setShowChat] = useState(true)
+  const [showStars, setShowStars] = useState(false)
 
   useEffect(() => {
     unlockQuickAudio()
@@ -149,6 +157,47 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     push(`Đã tắt mic của ${name}`, 'ok')
   }
 
+  const pipPeople = useMemo(
+    () =>
+      remotes.map((r) => {
+        const sameAsScreen = Boolean(r.sharing && r.screenStream && r.stream && r.stream.id === r.screenStream.id)
+        const camStream = r.sharing && (sameAsScreen || !r.screenStream) ? null : r.stream
+        return {
+          id: r.userId,
+          stream: camStream ?? r.stream,
+          label: r.name,
+          micOn: r.mic,
+          camOn: Boolean(r.camera && (camStream ?? r.stream)),
+          isHostUser: participants[r.userId]?.isHost === true,
+          stars: starScores[r.userId]?.count ?? 0,
+        }
+      }),
+    [participants, remotes, starScores],
+  )
+  const teachPip = useTeachPip(pipPeople, {
+    micOn,
+    camOn,
+    isHost,
+    onToggleMic: () => void toggleMic(),
+    onToggleCam: () => void toggleCam(),
+    onStopShare: () => void toggleScreenShare(),
+    onQuickComment: (comment) => void sendQuickComment(comment),
+    starTargets: Object.entries(participants)
+      .filter(([id]) => id !== userId)
+      .map(([id, p]) => ({
+        id,
+        name: p.name,
+        count: starScores[id]?.count ?? 0,
+      })),
+    onGiveStar: (id, name) => void giveStar(id, name),
+  })
+  const wasSharingRef = useRef(false)
+
+  useEffect(() => {
+    if (wasSharingRef.current && !screenSharing) teachPip.close()
+    wasSharingRef.current = screenSharing
+  }, [screenSharing, teachPip.close])
+
   if (status === 'error') {
     return (
       <div className="panel center">
@@ -176,14 +225,12 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         camOn={camOn}
         sharing={false}
         playfulEffects={playfulByUser[userId] ?? []}
+        stars={starScores[userId]?.count ?? 0}
+        starBurst={Boolean(starFxByUser[userId]?.length)}
       />
       {remotes.map((r) => {
-        const camStream =
-          r.sharing && r.screenStream && r.stream && r.stream.id !== r.screenStream.id
-            ? r.stream
-            : r.sharing && !r.screenStream
-              ? null
-              : r.stream
+        const sameAsScreen = Boolean(r.sharing && r.screenStream && r.stream && r.stream.id === r.screenStream.id)
+        const camStream = r.sharing && (sameAsScreen || !r.screenStream) ? null : r.stream
         const peerIsHost = participants[r.userId]?.isHost === true
         return (
           <VideoTile
@@ -199,11 +246,32 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             canMute={isHost && !peerIsHost}
             onMute={() => void onMuteRemote(r.userId, r.name)}
             playfulEffects={playfulByUser[r.userId] ?? []}
+            stars={starScores[r.userId]?.count ?? 0}
+            canStar={isHost}
+            onStar={() => void giveStar(r.userId, r.name)}
+            starBurst={Boolean(starFxByUser[r.userId]?.length)}
           />
         )
       })}
     </>
   )
+
+  const onToggleShare = async () => {
+    if (screenSharing) {
+      teachPip.close()
+      await toggleScreenShare()
+      return
+    }
+    const pipOk = await teachPip.openPip()
+    const started = await toggleScreenShare()
+    if (!started) {
+      teachPip.close()
+      return
+    }
+    if (!pipOk) {
+      push('Chrome/Edge: bấm «Học viên» để ghim hộp người khi chuyển tab dạy', 'warn')
+    }
+  }
 
   return (
     <div className="room">
@@ -213,7 +281,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
       <header className="room-bar">
         <div>
           <strong className="brand">{BRAND_SHORT}</strong>
-          <span className="muted"> / {roomId}</span>
+          <span className="muted"> / {roomName ? `${roomName} · ${roomId}` : roomId}</span>
           {isHost && <span className="pill host-pill">Host</span>}
         </div>
         <div className="room-bar-right">
@@ -228,14 +296,14 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         </div>
       </header>
 
-      <div className={`room-body ${stage ? 'has-stage' : ''}`}>
+      <div className={`room-body ${stage ? 'has-stage' : ''} ${showChat ? 'has-chat' : ''}`}>
         {stage ? (
           <section className="stage-layout">
             <div className="stage-main stage-with-stickers">
               <VideoTile
                 stream={stage.stream}
                 audioStream={screenSharing ? localStream : undefined}
-                muted={false}
+                muted={screenSharing}
                 label={stage.label}
                 micOn={stage.micOn}
                 camOn
@@ -269,37 +337,65 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             <aside className="stage-people">{peopleTiles}</aside>
           </section>
         ) : (
-          <section className={`grid count-${Math.min(1 + remotes.length, 3)}`}>{peopleTiles}</section>
+          <section className={`grid count-${Math.min(1 + remotes.length, 5)}`}>{peopleTiles}</section>
         )}
 
-        <aside className="chat">
-          <h2>Chat</h2>
-          <div className="chat-list">
-            {messages.length === 0 && <p className="muted">Chưa có tin nhắn</p>}
-            {messages.map((m) => (
-              <div key={m.id} className="chat-item">
-                <strong>{m.name}</strong>
-                <span>{m.text}</span>
+        <aside className={`chat${showChat ? '' : ' collapsed'}`}>
+          <h2>
+            {showChat && <span>Chat</span>}
+            <span className="chat-controls">
+              <button
+                type="button"
+                className="chat-toggle"
+                onClick={() => setShowChat((v) => !v)}
+                title={showChat ? 'Thu gọn chat' : 'Mở chat'}
+                aria-label={showChat ? 'Thu gọn chat' : 'Mở chat'}
+              >
+                −
+              </button>
+              {showChat && (
+                <button
+                  type="button"
+                  className="chat-close"
+                  title="Đóng chat"
+                  aria-label="Đóng chat"
+                  onClick={() => setShowChat(false)}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          </h2>
+          {showChat && (
+            <>
+              <div className="chat-list">
+                {messages.length === 0 && <p className="muted">Chưa có tin nhắn</p>}
+                {messages.map((m) => (
+                  <div key={m.id} className="chat-item">
+                    <strong>{m.name}</strong>
+                    <span>{m.text}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <form onSubmit={onSubmitChat} className="chat-form">
-            <input
-              value={chatText}
-              onChange={(e) => setChatText(e.target.value)}
-              placeholder="Nhắn gì đó..."
-              maxLength={500}
-            />
-            <button type="submit" className="btn icon-btn" title="Gửi">
-              <IconSend />
-              <span>Gửi</span>
-            </button>
-          </form>
+              <form onSubmit={onSubmitChat} className="chat-form">
+                <input
+                  value={chatText}
+                  onChange={(e) => setChatText(e.target.value)}
+                  placeholder="Nhắn gì đó..."
+                  maxLength={500}
+                />
+                <button type="submit" className="btn icon-btn" title="Gửi">
+                  <IconSend />
+                  <span>Gửi</span>
+                </button>
+              </form>
+            </>
+          )}
         </aside>
       </div>
 
       <footer className="controls">
-        {showQuickComments && (
+        {isHost && showQuickComments && (
           <QuickCommentBar
             onSend={(comment) => {
               void sendQuickComment(comment)
@@ -325,6 +421,36 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               setShowReactions(false)
             }}
           />
+        )}
+        {isHost && showStars && (
+          <StarBoard
+            participants={participants}
+            scores={starScores}
+            myUserId={userId}
+            onGive={(id, name) => {
+              void giveStar(id, name)
+            }}
+          />
+        )}
+        {isHost && (
+        <button
+          type="button"
+          className={`btn control-btn ${showStars ? 'active-share' : ''}`}
+          onClick={() => {
+            setShowStars((v) => !v)
+            setShowReactions(false)
+            setShowPlayfulPanel(false)
+            setShowQuickComments(false)
+            setShowStickerPanel(false)
+          }}
+          title="Tặng sao, xem điểm buổi học"
+          aria-label="Tặng sao"
+        >
+          <span className="react-face" aria-hidden>
+            ⭐
+          </span>
+          <span>Sao</span>
+        </button>
         )}
         <button
           type="button"
@@ -354,6 +480,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             setShowStickerPanel(false)
             setShowPlayfulPanel(false)
             setShowQuickComments(false)
+            setShowStars(false)
           }}
           title="Reaction vui"
           aria-label="Reaction"
@@ -371,6 +498,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             setShowReactions(false)
             setShowStickerPanel(false)
             setShowQuickComments(false)
+            setShowStars(false)
           }}
           title="Chọc ghẹo, tặng hoa, phê bình"
           aria-label="Chọc ghẹo"
@@ -380,6 +508,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           </span>
           <span>Chọc</span>
         </button>
+        {isHost && (
         <button
           type="button"
           className={`btn control-btn ${showQuickComments ? 'active-share' : ''}`}
@@ -389,6 +518,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             setShowReactions(false)
             setShowStickerPanel(false)
             setShowPlayfulPanel(false)
+            setShowStars(false)
           }}
           title="Bình luận nhanh buổi học"
           aria-label="Bình luận nhanh"
@@ -398,6 +528,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           </span>
           <span>Nhanh</span>
         </button>
+        )}
         {stage && (
           <button
             type="button"
@@ -407,6 +538,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               setShowReactions(false)
               setShowPlayfulPanel(false)
               setShowQuickComments(false)
+              setShowStars(false)
               if (showStickerPanel) setSelectedSticker(null)
             }}
             title="Sticker trên màn share"
@@ -418,10 +550,31 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             <span>Sticker</span>
           </button>
         )}
+        {screenSharing && (
+          <button
+            type="button"
+            className={`btn control-btn ${teachPip.open ? 'active-share' : ''}`}
+            onClick={() => {
+              if (teachPip.open) teachPip.close()
+              else {
+                void teachPip.openPip().then((ok) => {
+                  if (!ok) push('Cửa sổ học viên cần Chrome hoặc Edge mới', 'warn')
+                })
+              }
+            }}
+            title="Ghim hộp học viên lên màn hình khi dạy"
+            aria-label="Hộp học viên"
+          >
+            <span className="react-face" aria-hidden>
+              👥
+            </span>
+            <span>{teachPip.open ? 'Đóng hộp' : 'Học viên'}</span>
+          </button>
+        )}
         <button
           type="button"
           className={`btn control-btn ${screenSharing ? 'active-share' : ''}`}
-          onClick={() => void toggleScreenShare()}
+          onClick={() => void onToggleShare()}
           title={screenSharing ? 'Dừng share' : 'Share màn hình'}
           aria-label={screenSharing ? 'Dừng share' : 'Share màn hình'}
         >

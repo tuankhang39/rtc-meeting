@@ -8,9 +8,10 @@ import { ThemeToggle } from './ThemeToggle'
 type Props = {
   initialRoomId?: string
   onJoin: (roomId: string, name: string, asHost: boolean) => void
+  onOpenAdmin: () => void
 }
 
-export function Lobby({ initialRoomId = '', onJoin }: Props) {
+export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
   const [name, setName] = useState(() => localStorage.getItem('rtc-name') ?? '')
   const [roomId, setRoomId] = useState(initialRoomId)
   const [hostOk, setHostOk] = useState(() => isHostLoggedIn())
@@ -31,16 +32,11 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
     if (!configured) return
     const id = roomId.trim().toLowerCase()
     if (!id) return
-    enterRoom(id, false)
+    enterRoom(id, hostOk)
   }
 
   const createRoom = () => {
-    if (!configured) return
-    if (!hostOk) {
-      setShowLogin(true)
-      setLoginError(null)
-      return
-    }
+    if (!configured || !hostOk) return
     enterRoom(randomId(6), true)
   }
 
@@ -51,7 +47,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
       setShowLogin(false)
       setLoginError(null)
       setPass('')
-      enterRoom(randomId(6), true)
+      setUser('')
     } else {
       setLoginError('Sai username hoặc mật khẩu')
     }
@@ -80,7 +76,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
 
         {hostOk && (
           <div className="banner ok host-bar">
-            <span>Đã đăng nhập host</span>
+            <span>Đã đăng nhập host (lưu trên máy này)</span>
             <button
               type="button"
               className="btn ghost tiny"
@@ -117,22 +113,37 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
             <button type="submit" className="btn primary" disabled={!configured || !roomId.trim()}>
               Vào phòng
             </button>
-            <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
-              {hostOk ? 'Tạo phòng mới' : 'Đăng nhập để tạo phòng'}
-            </button>
+            {hostOk ? (
+              <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
+                Tạo phòng nhanh
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setShowLogin(true)
+                  setLoginError(null)
+                }}
+              >
+                Đăng nhập
+              </button>
+            )}
           </div>
         </form>
+
+        <p className="lobby-admin-link">
+          <button type="button" className="btn ghost tiny" onClick={onOpenAdmin}>
+            Trang quản lý /admin
+          </button>
+        </p>
       </div>
 
       {showLogin && (
         <div className="modal-backdrop" onClick={() => setShowLogin(false)}>
-          <form
-            className="modal-card"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={onLogin}
-          >
+          <form className="modal-card" onClick={(e) => e.stopPropagation()} onSubmit={onLogin}>
             <p className="eyebrow">Host only</p>
-            <h2>Đăng nhập tạo phòng</h2>
+            <h2>Đăng nhập</h2>
             <label>
               Username
               <input
@@ -155,7 +166,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
             {loginError && <p className="login-error">{loginError}</p>}
             <div className="lobby-actions">
               <button type="submit" className="btn primary">
-                Đăng nhập & tạo
+                Đăng nhập
               </button>
               <button type="button" className="btn" onClick={() => setShowLogin(false)}>
                 Hủy

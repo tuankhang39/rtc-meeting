@@ -13,3 +13,16 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+interface DocumentPictureInPicture {
+  requestWindow(options?: {
+    width?: number
+    height?: number
+    disallowReturnToOpener?: boolean
+    preferInitialWindowPlacement?: boolean
+  }): Promise<Window>
+}
+
+interface Window {
+  documentPictureInPicture?: DocumentPictureInPicture
+}

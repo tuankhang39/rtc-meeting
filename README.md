@@ -1,4 +1,4 @@
-# RTC — Zoom mini FREE (2–3 người)
+# RTC — Zoom mini FREE (2–5 người)
 
 Chế độ **0đ**: chỉ STUN + Firebase Spark + WebRTC P2P. **Không TURN**, không Blaze.
 
@@ -49,7 +49,7 @@ Mở URL Vite (thường `http://localhost:5173`):
 
 1. Nhập tên → **Tạo phòng**
 2. **Copy link** → mở tab/máy 2 → cho phép camera/mic
-3. Tối đa 3 người
+3. Tối đa 5 người. Phòng trống tự xoá sau 5 phút; phòng tạo sẵn (có tên) thì giữ.
 
 Dùng **WiFi nhà** là ổn nhất.
 
