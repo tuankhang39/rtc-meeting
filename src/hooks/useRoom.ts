@@ -314,10 +314,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           makingOfferRef.current.set(peerId, true)
           if (pc.signalingState !== 'stable') return
           await pc.setLocalDescription(await pc.createOffer())
-          if (pc.signalingState !== 'have-local-offer') return
+          const local = pc.localDescription
+          if (!local) return
           await sendSignal(peerId, {
             type: 'offer',
-            sdp: descInit(pc.localDescription),
+            sdp: descInit(local),
           })
         } catch (e) {
           console.error('negotiationneeded', e)
