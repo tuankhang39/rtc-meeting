@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
+import { BRAND_DESC, BRAND_NAME, BRAND_TAGLINE } from '../lib/brand'
 import { isFirebaseConfigured } from '../lib/firebase'
 import { isHostLoggedIn, loginHost, logoutHost } from '../lib/hostAuth'
 import { randomId } from '../lib/webrtc'
+import { ThemeToggle } from './ThemeToggle'
 
 type Props = {
   initialRoomId?: string
-  onJoin: (roomId: string, name: string) => void
+  onJoin: (roomId: string, name: string, asHost: boolean) => void
 }
 
 export function Lobby({ initialRoomId = '', onJoin }: Props) {
@@ -18,10 +20,10 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
   const [loginError, setLoginError] = useState<string | null>(null)
   const configured = isFirebaseConfigured()
 
-  const enterRoom = (id: string) => {
+  const enterRoom = (id: string, asHost: boolean) => {
     const display = name.trim() || `Guest-${randomId(3)}`
     localStorage.setItem('rtc-name', display)
-    onJoin(id, display)
+    onJoin(id, display, asHost)
   }
 
   const joinExisting = (e: FormEvent) => {
@@ -29,7 +31,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
     if (!configured) return
     const id = roomId.trim().toLowerCase()
     if (!id) return
-    enterRoom(id)
+    enterRoom(id, false)
   }
 
   const createRoom = () => {
@@ -39,7 +41,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
       setLoginError(null)
       return
     }
-    enterRoom(randomId(6))
+    enterRoom(randomId(6), true)
   }
 
   const onLogin = (e: FormEvent) => {
@@ -49,7 +51,7 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
       setShowLogin(false)
       setLoginError(null)
       setPass('')
-      enterRoom(randomId(6))
+      enterRoom(randomId(6), true)
     } else {
       setLoginError('Sai username hoặc mật khẩu')
     }
@@ -57,12 +59,17 @@ export function Lobby({ initialRoomId = '', onJoin }: Props) {
 
   return (
     <div className="lobby">
+      <ThemeToggle className="theme-toggle-float" />
       <div className="lobby-card">
         <span className="card-sticker card-sticker-l">🍓</span>
         <span className="card-sticker card-sticker-r">🧸</span>
-        <p className="eyebrow">Cute call · pink room</p>
-        <h1 className="brand-hero">RTC</h1>
-        <p className="lede">Họp video 2–3 người. Ai cũng vào được bằng Room ID — tạo phòng cần đăng nhập host.</p>
+        <p className="eyebrow">{BRAND_TAGLINE}</p>
+        <h1 className="brand-hero">
+          <span className="brand-hero-line">Cuộc hợp của</span>
+          <span className="brand-hero-main">Xiao xin Laoshi</span>
+        </h1>
+        <p className="lede">{BRAND_DESC}</p>
+        <span className="sr-only">{BRAND_NAME}</span>
 
         {!configured && (
           <div className="banner warn">

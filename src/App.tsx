@@ -11,7 +11,7 @@ function readRoomFromUrl() {
 
 export default function App() {
   const initialRoom = useMemo(() => readRoomFromUrl(), [])
-  const [session, setSession] = useState<{ roomId: string; name: string } | null>(null)
+  const [session, setSession] = useState<{ roomId: string; name: string; asHost: boolean } | null>(null)
 
   return (
     <div className="app-shell">
@@ -20,17 +20,18 @@ export default function App() {
         {!session ? (
           <Lobby
             initialRoomId={initialRoom}
-            onJoin={(roomId, name) => {
+            onJoin={(roomId, name, asHost) => {
               const url = new URL(window.location.href)
               url.searchParams.set('room', roomId)
               window.history.replaceState({}, '', url)
-              setSession({ roomId, name })
+              setSession({ roomId, name, asHost })
             }}
           />
         ) : (
           <Room
             roomId={session.roomId}
             displayName={session.name}
+            asHost={session.asHost}
             onLeave={() => {
               const url = new URL(window.location.href)
               url.searchParams.delete('room')

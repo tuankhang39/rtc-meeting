@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme='pink'] {
   --bg0: #f6eef2;
   --bg1: #f0e4ea;
   --bg2: #e8d5df;
@@ -10,6 +11,20 @@
   --accent-deep: #b56b88;
   --danger: #c96b7e;
   --ok: #c99bb0;
+  --surface: rgba(255, 252, 253, 0.92);
+  --surface-2: rgba(255, 255, 255, 0.78);
+  --tile-bg: linear-gradient(165deg, #f5e8ee, #eadde5);
+  --tile-border: #b85a7f;
+  --btn-primary: linear-gradient(135deg, #d4a0b4, #c07a96);
+  --btn-primary-text: #fff;
+  --input-bg: rgba(255, 255, 255, 0.85);
+  --bar-bg: rgba(255, 255, 255, 0.72);
+  --shadow: rgba(120, 70, 95, 0.12);
+  --body-grad:
+    radial-gradient(700px 420px at 8% -5%, rgba(200, 150, 170, 0.22), transparent 58%),
+    radial-gradient(620px 380px at 100% 0%, rgba(180, 120, 145, 0.14), transparent 55%),
+    radial-gradient(500px 300px at 50% 100%, rgba(190, 150, 170, 0.16), transparent 50%),
+    linear-gradient(165deg, #f7f0f3, #f0e6ec 48%, #eadde5);
   --radius: 18px;
   font-family: 'Nunito', 'Outfit', 'Segoe UI', sans-serif;
   line-height: 1.45;
@@ -18,6 +33,36 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg0: #0e1014;
+  --bg1: #151920;
+  --bg2: #1c222b;
+  --line: rgba(148, 163, 184, 0.18);
+  --text: #e8edf4;
+  --muted: #94a3b8;
+  --accent: #8ec5e8;
+  --accent-2: #6b9ec4;
+  --accent-deep: #b8d9f0;
+  --danger: #f07178;
+  --ok: #7eb8a0;
+  --surface: rgba(22, 26, 34, 0.96);
+  --surface-2: rgba(30, 36, 46, 0.92);
+  --tile-bg: linear-gradient(165deg, #1a2029, #12161d);
+  --tile-border: #5b6b7c;
+  --btn-primary: linear-gradient(135deg, #4a6d8c, #355570);
+  --btn-primary-text: #f2f7fb;
+  --input-bg: rgba(28, 34, 44, 0.95);
+  --bar-bg: rgba(16, 20, 26, 0.92);
+  --shadow: rgba(0, 0, 0, 0.35);
+  --body-grad:
+    radial-gradient(700px 420px at 8% -5%, rgba(70, 110, 150, 0.16), transparent 58%),
+    radial-gradient(620px 380px at 100% 0%, rgba(50, 80, 110, 0.12), transparent 55%),
+    radial-gradient(500px 300px at 50% 100%, rgba(40, 55, 70, 0.18), transparent 50%),
+    linear-gradient(165deg, #0b0d11, #12161c 48%, #0e1218);
+  color-scheme: dark;
 }
 
 * {
@@ -33,11 +78,8 @@ body,
 
 body {
   min-width: 320px;
-  background:
-    radial-gradient(700px 420px at 8% -5%, rgba(200, 150, 170, 0.22), transparent 58%),
-    radial-gradient(620px 380px at 100% 0%, rgba(180, 120, 145, 0.14), transparent 55%),
-    radial-gradient(500px 300px at 50% 100%, rgba(190, 150, 170, 0.16), transparent 50%),
-    linear-gradient(165deg, #f7f0f3, #f0e6ec 48%, #eadde5);
+  background: var(--body-grad);
+  color: var(--text);
 }
 
 button,
