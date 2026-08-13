@@ -75,7 +75,7 @@ export async function acquireLocalMedia(): Promise<LocalMedia> {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true })
         return { stream, mic: false, camera: true, warning: null }
       } catch {
-        return { stream: new MediaStream(), mic: false, camera: false, warning: null }
+        return { stream: new MediaStream(), mic: false, camera: false, warning: 'Không mở được camera và mic. Kiểm tra quyền trình duyệt / thiết bị rồi tải lại trang.' }
       }
     }
   }

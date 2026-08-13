@@ -164,10 +164,10 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         const camStream = r.sharing && (sameAsScreen || !r.screenStream) ? null : r.stream
         return {
           id: r.userId,
-          stream: camStream ?? r.stream,
+          stream: camStream,
           label: r.name,
           micOn: r.mic,
-          camOn: Boolean(r.camera && (camStream ?? r.stream)),
+          camOn: Boolean(r.camera && camStream),
           isHostUser: participants[r.userId]?.isHost === true,
           stars: starScores[r.userId]?.count ?? 0,
         }

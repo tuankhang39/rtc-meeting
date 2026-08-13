@@ -1,5 +1,5 @@
 import { type FirebaseApp, initializeApp } from 'firebase/app'
-import { type Database, getDatabase, goOffline, goOnline, onDisconnect, ref, remove, set } from 'firebase/database'
+import { type Database, getDatabase, goOnline, onDisconnect, ref, remove, set } from 'firebase/database'
 import { randomId } from './webrtc'
 
 const firebaseConfig = {
@@ -61,9 +61,6 @@ export function disconnectDb() {
     void remove(ref(database, `appPresence/${presenceId}`))
     presenceId = null
   }
-  try {
-    goOffline(database)
-  } catch {
-    /* ignore */
-  }
+  // Không goOffline: cắt socket rồi vào lại phòng cũ làm signaling/WebRTC chết.
+  // Tab đóng thì onDisconnect vẫn gỡ presence.
 }

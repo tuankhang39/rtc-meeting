@@ -32,7 +32,14 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
     if (!configured) return
     const id = roomId.trim().toLowerCase()
     if (!id) return
-    enterRoom(id, hostOk)
+    enterRoom(id, false)
+  }
+
+  const joinAsHost = () => {
+    if (!configured || !hostOk) return
+    const id = roomId.trim().toLowerCase()
+    if (!id) return
+    enterRoom(id, true)
   }
 
   const createRoom = () => {
@@ -61,8 +68,8 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
         <span className="card-sticker card-sticker-r">🧸</span>
         <p className="eyebrow">{BRAND_TAGLINE}</p>
         <h1 className="brand-hero">
-          <span className="brand-hero-line">Cuộc hợp của</span>
-          <span className="brand-hero-main">Xiao xin Laoshi</span>
+          <span className="brand-hero-line">Cuộc họp của</span>
+          <span className="brand-hero-main">Xiao Xin Laoshi</span>
         </h1>
         <p className="lede">{BRAND_DESC}</p>
         <span className="sr-only">{BRAND_NAME}</span>
@@ -113,6 +120,11 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
             <button type="submit" className="btn primary" disabled={!configured || !roomId.trim()}>
               Vào phòng
             </button>
+            {hostOk && (
+              <button type="button" className="btn" disabled={!configured || !roomId.trim()} onClick={joinAsHost}>
+                Vào dạy
+              </button>
+            )}
             {hostOk ? (
               <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
                 Tạo phòng nhanh
