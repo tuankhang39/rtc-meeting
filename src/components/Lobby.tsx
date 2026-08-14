@@ -32,14 +32,7 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
     if (!configured) return
     const id = roomId.trim().toLowerCase()
     if (!id) return
-    enterRoom(id, false)
-  }
-
-  const joinAsHost = () => {
-    if (!configured || !hostOk) return
-    const id = roomId.trim().toLowerCase()
-    if (!id) return
-    enterRoom(id, true)
+    enterRoom(id, hostOk || isHostLoggedIn())
   }
 
   const createRoom = () => {
@@ -118,13 +111,8 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
           </label>
           <div className="lobby-actions">
             <button type="submit" className="btn primary" disabled={!configured || !roomId.trim()}>
-              Vào phòng
+              {hostOk ? 'Vào phòng (host)' : 'Vào phòng'}
             </button>
-            {hostOk && (
-              <button type="button" className="btn" disabled={!configured || !roomId.trim()} onClick={joinAsHost}>
-                Vào dạy
-              </button>
-            )}
             {hostOk ? (
               <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
                 Tạo phòng nhanh

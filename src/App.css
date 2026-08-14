@@ -1657,6 +1657,104 @@
   cursor: pointer;
 }
 
+.draw-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  touch-action: none;
+}
+
+.draw-overlay.draw-draw {
+  cursor: crosshair;
+}
+
+.draw-overlay.draw-erase {
+  cursor: pointer;
+}
+
+.draw-clear-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 8;
+  border: 1px solid rgba(200, 150, 170, 0.4);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--accent-deep);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.draw-tools {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 30;
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: min(420px, calc(100% - 24px));
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(200, 150, 170, 0.35);
+  background: rgba(255, 252, 253, 0.96);
+  box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
+  animation: rise 0.25s ease both;
+}
+
+.draw-tool-btn {
+  border: 1px solid rgba(200, 150, 170, 0.35);
+  background: #fff;
+  color: var(--accent-deep);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.draw-tool-btn.active {
+  background: linear-gradient(135deg, #d4a0b4, #c07a96);
+  color: #fff;
+  border-color: transparent;
+}
+
+.draw-tool-btn.danger {
+  color: #c73a5a;
+}
+
+.draw-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.draw-colors {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.draw-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(120, 70, 95, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+
+.draw-color.selected {
+  box-shadow: 0 0 0 2px var(--accent-deep);
+}
+
 .sticker-picker {
   position: absolute;
   left: 12px;
@@ -2045,6 +2143,23 @@
 [data-theme='dark'] .sticker-tab.active {
   background: rgba(110, 160, 200, 0.2);
   border-color: rgba(142, 197, 232, 0.45);
+}
+
+[data-theme='dark'] .draw-tools,
+[data-theme='dark'] .draw-clear-btn {
+  background: rgba(22, 26, 34, 0.96);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+[data-theme='dark'] .draw-tool-btn {
+  background: rgba(30, 36, 46, 0.95);
+  color: var(--accent-deep);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+[data-theme='dark'] .draw-tool-btn.active {
+  background: rgba(110, 160, 200, 0.28);
+  color: #e8edf4;
 }
 
 [data-theme='dark'] .tile-star-btn {

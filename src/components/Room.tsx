@@ -18,6 +18,7 @@ import { ReactionBar, ReactionBurst } from './Reactions'
 import { QuickCommentBar } from './QuickComments'
 import { unlockQuickAudio } from '../lib/quickAudio'
 import { PlayfulPicker } from './PlayfulInteractions'
+import { ScreenDrawOverlay } from './ScreenDraw'
 import { ScreenStickerOverlay, StickerPackPicker } from './ScreenStickers'
 import { ThemeToggle } from './ThemeToggle'
 import { VideoTile } from './VideoTile'
@@ -51,6 +52,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     joinToast,
     reactions,
     screenStickers,
+    drawStrokes,
+    drawBoard,
     playfulByUser,
     playfulToast,
     quickCommentToast,
@@ -194,7 +197,9 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   const wasSharingRef = useRef(false)
 
   useEffect(() => {
-    if (wasSharingRef.current && !screenSharing) teachPip.close()
+    if (wasSharingRef.current && !screenSharing) {
+      teachPip.close()
+    }
     wasSharingRef.current = screenSharing
   }, [screenSharing, teachPip.close])
 
@@ -325,6 +330,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                   push('Đã xóa sticker trên màn share', 'ok')
                 }}
               />
+              <ScreenDrawOverlay strokes={drawStrokes} board={drawBoard} />
               {showStickerPanel && (
                 <StickerPackPicker
                   packId={stickerPack}

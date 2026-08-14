@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   get,
   increment,
@@ -22,6 +22,7 @@ import {
 } from '../lib/playful'
 import { quickCommentAnnounce, type QuickComment } from '../lib/quickComments'
 import { playQuickCommentSound, unlockQuickAudio } from '../lib/quickAudio'
+import type { DrawStroke } from '../lib/draw'
 import type { ScreenSticker, StickerPackId } from '../lib/stickers'
 import { MAX_PARTICIPANTS, createPeerConnection, randomId } from '../lib/webrtc'
 import { markRoomEmptyIfNeeded, markRoomOccupied, sweepEmptyRooms } from '../lib/rooms'
@@ -116,6 +117,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const [hostNotice, setHostNotice] = useState<string | null>(null)
   const [reactions, setReactions] = useState<RoomReaction[]>([])
   const [screenStickers, setScreenStickers] = useState<ScreenSticker[]>([])
+  const [drawCommitted, setDrawCommitted] = useState<DrawStroke[]>([])
+  const [drawLive, setDrawLive] = useState<DrawStroke[]>([])
+  const [drawBoard, setDrawBoard] = useState(false)
+  const drawStrokes = useMemo(() => [...drawCommitted, ...drawLive], [drawCommitted, drawLive])
   const [playfulByUser, setPlayfulByUser] = useState<Record<string, PlayfulEffect[]>>({})
   const [playfulToast, setPlayfulToast] = useState<string | null>(null)
   const [quickCommentToast, setQuickCommentToast] = useState<string | null>(null)
@@ -843,6 +848,52 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         })
         cleanups.push(() => unsubStickers())
 
+        const unsubDraw = onValue(ref(db, `rooms/${roomId}/drawings`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<DrawStroke, 'id'>> | null) ?? {}
+          const list: DrawStroke[] = Object.entries(val)
+            .map(([id, s]) => ({
+              id,
+              ...s,
+              kind: s.kind === 'text' ? ('text' as const) : ('stroke' as const),
+              points: Array.isArray(s.points) ? s.points : [],
+              text: typeof s.text === 'string' ? s.text : '',
+              x: typeof s.x === 'number' ? s.x : 0,
+              y: typeof s.y === 'number' ? s.y : 0,
+              size: typeof s.size === 'number' ? s.size : 4,
+            }))
+            .filter((s) => (s.kind === 'text' ? Boolean(s.text?.trim()) : s.points.length > 0))
+          list.sort((a, b) => a.createdAt - b.createdAt)
+          setDrawCommitted(list.slice(-80))
+        })
+        cleanups.push(() => unsubDraw())
+
+        const unsubDrawLive = onValue(ref(db, `rooms/${roomId}/drawLive`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<DrawStroke, 'id'>> | null) ?? {}
+          const list: DrawStroke[] = Object.entries(val)
+            .map(([id, s]) => ({
+              id: `live-${id}`,
+              ...s,
+              kind: s.kind === 'text' ? ('text' as const) : ('stroke' as const),
+              points: Array.isArray(s.points) ? s.points : [],
+              text: typeof s.text === 'string' ? s.text : '',
+              x: typeof s.x === 'number' ? s.x : 0,
+              y: typeof s.y === 'number' ? s.y : 0,
+              size: typeof s.size === 'number' ? s.size : 4,
+              userId: s.userId || id,
+              name: s.name || '',
+              createdAt: s.createdAt || 0,
+            }))
+            .filter((s) => (s.kind === 'text' ? Boolean(String(s.text || '').trim()) : s.points.length > 0))
+          setDrawLive(list)
+        })
+        cleanups.push(() => unsubDrawLive())
+
+        const unsubBoard = onValue(ref(db, `rooms/${roomId}/drawBoard`), (snap) => {
+          const val = snap.val() as { on?: boolean } | null
+          setDrawBoard(Boolean(val?.on))
+        })
+        cleanups.push(() => unsubBoard())
+
         const unsubPlayful = onChildAdded(ref(db, `rooms/${roomId}/playful`), (snap) => {
           const val = snap.val() as Omit<PlayfulEffect, 'id'> | null
           if (!val?.kind || !val.toUserId || !snap.key) return
@@ -1009,8 +1060,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     await update(ref(getDb(), `rooms/${roomId}/participants/${userId}`), {
       sharing: false,
     })
-    // Xóa sticker trên màn share khi dừng share
+    // Xóa sticker / nét vẽ trên màn share khi dừng share
     await remove(ref(getDb(), `rooms/${roomId}/stickers`))
+    await remove(ref(getDb(), `rooms/${roomId}/drawings`))
+    await remove(ref(getDb(), `rooms/${roomId}/drawLive`))
+    await remove(ref(getDb(), `rooms/${roomId}/drawBoard`))
   }, [roomId, unpublishScreenTrack, userId])
 
   stopScreenShareRef.current = stopScreenShare
@@ -1243,6 +1297,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     joinToast,
     reactions,
     screenStickers,
+    drawStrokes,
+    drawBoard,
     playfulByUser,
     playfulToast,
     quickCommentToast,
