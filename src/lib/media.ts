@@ -62,13 +62,15 @@ export async function acquireLocalMedia(): Promise<LocalMedia> {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: { facingMode: 'user' },
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
     })
     return { stream, mic: true, camera: true, warning: null }
   } catch {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      })
       return { stream, mic: true, camera: false, warning: null }
     } catch {
       try {

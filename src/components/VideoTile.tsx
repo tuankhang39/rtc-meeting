@@ -65,7 +65,16 @@ export function VideoTile({
     if (!el) return
     const src = muted ? null : (audioStream ?? stream)
     if (el.srcObject !== src) el.srcObject = src
-    if (src) void el.play().catch(() => {})
+    if (!src?.getAudioTracks().some((t) => t.readyState === 'live')) return
+
+    const play = () => {
+      void el.play().catch(() => {})
+    }
+    play()
+    document.addEventListener('pointerdown', play, { once: true })
+    return () => {
+      document.removeEventListener('pointerdown', play)
+    }
   }, [audioStream, muted, stream])
 
   const showVideo = sharing || camOn

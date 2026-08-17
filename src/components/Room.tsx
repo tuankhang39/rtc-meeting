@@ -113,6 +113,51 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
 
   const count = useMemo(() => Object.keys(participants).length, [participants])
 
+  const otherPeople = useMemo(() => {
+    const ids = new Set([
+      ...Object.keys(participants).filter((id) => id !== userId),
+      ...remotes.map((r) => r.userId),
+    ])
+    return [...ids]
+      .map((id) => {
+        const p = participants[id]
+        const r = remotes.find((x) => x.userId === id)
+        const sharing = p?.sharing ?? r?.sharing ?? false
+        const stream = r?.stream ?? null
+        const screenStream = r?.screenStream ?? null
+        const sameAsScreen = Boolean(sharing && screenStream && stream && stream.id === screenStream.id)
+        const camStream = sharing && (sameAsScreen || !screenStream) ? null : stream
+        const linked = r?.link === 'connected'
+        const hasMedia = Boolean(r?.hasAudio || r?.hasVideo)
+        return {
+          userId: id,
+          name: p?.name ?? r?.name ?? id.slice(0, 6),
+          mic: r?.hasAudio ? r.mic : (p?.mic ?? false),
+          camera: r?.hasVideo ? r.camera && Boolean(camStream) : false,
+          sharing,
+          isHost: p?.isHost === true,
+          camStream,
+          stream,
+          linked,
+          connecting: !hasMedia || !linked,
+          joinedAt: p?.joinedAt ?? 0,
+        }
+      })
+      .sort((a, b) => a.joinedAt - b.joinedAt)
+  }, [participants, remotes, userId])
+
+  const linkWarnRef = useRef(false)
+  useEffect(() => {
+    const failed = remotes.some((r) => r.link === 'failed')
+    if (failed && !linkWarnRef.current) {
+      linkWarnRef.current = true
+      push(
+        'Chưa nghe/thấy được ai đó: thử cùng WiFi, tắt VPN, bấm một lần vào màn hình (bật tiếng trình duyệt).',
+        'warn',
+      )
+    }
+  }, [remotes, push])
+
   const stage = useMemo(() => {
     if (screenSharing && screenStream) {
       return { stream: screenStream, label: `${displayName} · màn hình`, micOn, sharing: true }
@@ -162,20 +207,16 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
 
   const pipPeople = useMemo(
     () =>
-      remotes.map((r) => {
-        const sameAsScreen = Boolean(r.sharing && r.screenStream && r.stream && r.stream.id === r.screenStream.id)
-        const camStream = r.sharing && (sameAsScreen || !r.screenStream) ? null : r.stream
-        return {
-          id: r.userId,
-          stream: camStream,
-          label: r.name,
-          micOn: r.mic,
-          camOn: Boolean(r.camera && camStream),
-          isHostUser: participants[r.userId]?.isHost === true,
-          stars: starScores[r.userId]?.count ?? 0,
-        }
-      }),
-    [participants, remotes, starScores],
+      otherPeople.map((r) => ({
+        id: r.userId,
+        stream: r.camStream,
+        label: r.name,
+        micOn: r.mic,
+        camOn: r.camera,
+        isHostUser: r.isHost,
+        stars: starScores[r.userId]?.count ?? 0,
+      })),
+    [otherPeople, starScores],
   )
   const teachPip = useTeachPip(pipPeople, {
     micOn,
@@ -233,22 +274,18 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         stars={starScores[userId]?.count ?? 0}
         starBurst={Boolean(starFxByUser[userId]?.length)}
       />
-      {remotes.map((r) => {
-        const sameAsScreen = Boolean(r.sharing && r.screenStream && r.stream && r.stream.id === r.screenStream.id)
-        const camStream = r.sharing && (sameAsScreen || !r.screenStream) ? null : r.stream
-        const peerIsHost = participants[r.userId]?.isHost === true
-        return (
+      {otherPeople.map((r) => (
           <VideoTile
             key={r.userId}
-            stream={camStream}
+            stream={r.camStream}
             audioStream={r.stream}
             compact={Boolean(stage)}
-            label={r.name}
+            label={r.connecting ? `${r.name} · đang kết nối` : r.name}
             micOn={r.mic}
-            camOn={r.camera && Boolean(camStream)}
+            camOn={r.camera}
             sharing={r.sharing}
-            isHostUser={peerIsHost}
-            canMute={isHost && !peerIsHost}
+            isHostUser={r.isHost}
+            canMute={isHost && !r.isHost}
             onMute={() => void onMuteRemote(r.userId, r.name)}
             playfulEffects={playfulByUser[r.userId] ?? []}
             stars={starScores[r.userId]?.count ?? 0}
@@ -256,8 +293,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             onStar={() => void giveStar(r.userId, r.name)}
             starBurst={Boolean(starFxByUser[r.userId]?.length)}
           />
-        )
-      })}
+        ))}
     </>
   )
 
@@ -343,7 +379,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             <aside className="stage-people">{peopleTiles}</aside>
           </section>
         ) : (
-          <section className={`grid count-${Math.min(1 + remotes.length, 5)}`}>{peopleTiles}</section>
+          <section className={`grid count-${Math.min(1 + otherPeople.length, 5)}`}>{peopleTiles}</section>
         )}
 
         <aside className={`chat${showChat ? '' : ' collapsed'}`}>

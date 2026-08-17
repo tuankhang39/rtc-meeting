@@ -71,6 +71,9 @@ export type RemotePeer = {
   mic: boolean
   camera: boolean
   sharing: boolean
+  link: RTCPeerConnection['connectionState'] | 'none'
+  hasAudio: boolean
+  hasVideo: boolean
 }
 
 export type StarScore = {
@@ -229,16 +232,36 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
     const listenPeerSignals = (from: string) => {
       if (!from || from === userId || signalUnsubs.has(from)) return
-      const unsubMsgs = onChildAdded(ref(db, `rooms/${roomId}/signals/${userId}/${from}`), async (msgSnap) => {
-        if (!alive()) return
-        const payload = msgSnap.val() as SignalPayload & { createdAt?: number }
-        if (!payload?.type) return
+      const msgsRef = ref(db, `rooms/${roomId}/signals/${userId}/${from}`)
+
+      const handleMsg = async (
+        key: string | null,
+        payload: SignalPayload & { createdAt?: number },
+        msgRef: ReturnType<typeof ref>,
+      ) => {
+        if (!alive() || !key || !payload?.type) return
         if (typeof payload.createdAt === 'number' && payload.createdAt < sessionStartedAt - 15_000) {
-          void remove(msgSnap.ref)
+          void remove(msgRef)
           return
         }
         await enqueueSignal(from, payload)
-        void remove(msgSnap.ref)
+        void remove(msgRef)
+      }
+
+      void get(msgsRef).then((inbox) => {
+        if (!inbox.exists() || !alive()) return
+        const val = inbox.val() as Record<string, SignalPayload & { createdAt?: number }>
+        const keys = Object.keys(val).sort((a, b) => (val[a]?.createdAt ?? 0) - (val[b]?.createdAt ?? 0))
+        for (const key of keys) {
+          const payload = val[key]
+          if (!payload) continue
+          void handleMsg(key, payload, ref(db, `rooms/${roomId}/signals/${userId}/${from}/${key}`))
+        }
+      })
+
+      const unsubMsgs = onChildAdded(msgsRef, async (msgSnap) => {
+        const payload = msgSnap.val() as SignalPayload & { createdAt?: number }
+        await handleMsg(msgSnap.key, payload, msgSnap.ref)
       })
       signalUnsubs.set(from, unsubMsgs)
     }
@@ -253,14 +276,21 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       const media = remoteMediaRef.current.get(peerId)
       const meta = participantsRef.current[peerId]
       const screenLive = Boolean(media?.screen.getVideoTracks().some((t) => t.readyState !== 'ended'))
+      const audioTrack = media?.camera.getAudioTracks().find((t) => t.readyState !== 'ended')
+      const videoTrack = media?.camera.getVideoTracks().find((t) => t.readyState !== 'ended')
+      const hasMedia = Boolean(audioTrack || videoTrack)
+      const pc = pcsRef.current.get(peerId)
       const peer: RemotePeer = {
         userId: peerId,
         name: meta?.name ?? peerId.slice(0, 6),
-        mic: meta?.mic ?? true,
-        camera: meta?.camera ?? true,
+        mic: audioTrack ? meta?.mic !== false && audioTrack.enabled : (meta?.mic ?? false),
+        camera: videoTrack ? meta?.camera !== false && videoTrack.enabled : (meta?.camera ?? false),
         sharing: meta?.sharing ?? screenLive,
-        stream: media?.camera ?? null,
+        stream: hasMedia ? media!.camera : null,
         screenStream: screenLive ? media!.screen : null,
+        link: pc?.connectionState ?? 'none',
+        hasAudio: Boolean(audioTrack),
+        hasVideo: Boolean(videoTrack),
       }
       setRemotes((prev) => {
         if (!prev.some((p) => p.userId === peerId)) return [...prev, peer]
@@ -437,6 +467,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
       pc.onconnectionstatechange = () => {
         if (pcsRef.current.get(peerId) !== pc) return
+        upsertRemote(peerId)
         if (pc.connectionState === 'disconnected') {
           window.setTimeout(() => {
             if (pcsRef.current.get(peerId) !== pc) return
@@ -475,10 +506,17 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       }
 
       const stream = localStreamRef.current
-      if (stream) {
-        for (const t of stream.getTracks()) {
-          if (t.readyState === 'ended') continue
+      const liveTracks = stream?.getTracks().filter((t) => t.readyState !== 'ended') ?? []
+      if (liveTracks.length > 0 && stream) {
+        for (const t of liveTracks) {
           pc.addTrack(t, stream)
+        }
+      } else {
+        try {
+          pc.addTransceiver('audio', { direction: 'recvonly' })
+          pc.addTransceiver('video', { direction: 'recvonly' })
+        } catch (e) {
+          console.error('addTransceiver', e)
         }
       }
       if (screenTrackRef.current && screenStreamRef.current) {
@@ -488,6 +526,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       void startOffer(peerId)
       scheduleOfferRetry(peerId)
       listenPeerSignals(peerId)
+      upsertRemote(peerId)
       return pc
     }
 
@@ -618,8 +657,9 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         }
 
         const meRef = ref(db, `rooms/${roomId}/participants/${userId}`)
+        const signalsInRef = ref(db, `rooms/${roomId}/signals/${userId}`)
 
-        const unsubSignals = onChildAdded(ref(db, `rooms/${roomId}/signals/${userId}`), (fromSnap) => {
+        const unsubSignals = onChildAdded(signalsInRef, (fromSnap) => {
           const from = fromSnap.key
           if (from) listenPeerSignals(from)
         })
@@ -627,6 +667,13 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           unsubSignals()
           for (const u of signalUnsubs.values()) u()
           signalUnsubs.clear()
+        })
+
+        void get(signalsInRef).then((snap) => {
+          if (!snap.exists() || !alive()) return
+          for (const from of Object.keys(snap.val() as Record<string, unknown>)) {
+            listenPeerSignals(from)
+          }
         })
 
         const unsubParticipants = onValue(ref(db, `rooms/${roomId}/participants`), (snap) => {
@@ -640,11 +687,13 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
               const meta = val[r.userId]
               if (!meta) return r
               const sharing = meta.sharing ?? false
+              const audioTrack = r.stream?.getAudioTracks().find((t) => t.readyState !== 'ended')
+              const videoTrack = r.stream?.getVideoTracks().find((t) => t.readyState !== 'ended')
               return {
                 ...r,
                 name: meta.name,
-                mic: meta.mic,
-                camera: meta.camera,
+                mic: audioTrack ? meta.mic !== false && audioTrack.enabled : meta.mic,
+                camera: videoTrack ? meta.camera !== false && videoTrack.enabled : meta.camera,
                 sharing,
                 screenStream: sharing ? r.screenStream : null,
               }
