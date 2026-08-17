@@ -230,6 +230,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       return { type: desc.type, sdp: desc.sdp }
     }
 
+    const processedSignalKeys = new Set<string>()
+
     const listenPeerSignals = (from: string) => {
       if (!from || from === userId || signalUnsubs.has(from)) return
       const msgsRef = ref(db, `rooms/${roomId}/signals/${userId}/${from}`)
@@ -240,6 +242,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         msgRef: ReturnType<typeof ref>,
       ) => {
         if (!alive() || !key || !payload?.type) return
+        const dedupe = `${from}/${key}`
+        if (processedSignalKeys.has(dedupe)) return
+        processedSignalKeys.add(dedupe)
+
         if (typeof payload.createdAt === 'number' && payload.createdAt < sessionStartedAt - 15_000) {
           void remove(msgRef)
           return
@@ -247,17 +253,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         await enqueueSignal(from, payload)
         void remove(msgRef)
       }
-
-      void get(msgsRef).then((inbox) => {
-        if (!inbox.exists() || !alive()) return
-        const val = inbox.val() as Record<string, SignalPayload & { createdAt?: number }>
-        const keys = Object.keys(val).sort((a, b) => (val[a]?.createdAt ?? 0) - (val[b]?.createdAt ?? 0))
-        for (const key of keys) {
-          const payload = val[key]
-          if (!payload) continue
-          void handleMsg(key, payload, ref(db, `rooms/${roomId}/signals/${userId}/${from}/${key}`))
-        }
-      })
 
       const unsubMsgs = onChildAdded(msgsRef, async (msgSnap) => {
         const payload = msgSnap.val() as SignalPayload & { createdAt?: number }
@@ -399,17 +394,25 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       void remove(ref(db, `rooms/${roomId}/signals/${userId}/${peerId}`))
     }
 
-    const startOffer = async (peerId: string) => {
+    const startOffer = async (peerId: string, force = false) => {
       if (!alive()) return
       const pc = pcsRef.current.get(peerId)
-      if (!pc || pc.signalingState !== 'stable') return
+      if (!pc) return
+      if (!force && pc.signalingState !== 'stable') return
       if (makingOfferRef.current.get(peerId)) return
-      // Lần đầu chỉ 1 phía offer. Sau khi đã nối, cả hai được offer (share màn hình).
       const alreadyNegotiated = Boolean(pc.currentRemoteDescription ?? pc.remoteDescription)
-      if (!alreadyNegotiated && !isOfferer(peerId)) return
+      if (!force && !alreadyNegotiated && !isOfferer(peerId)) return
+      if (force && !isOfferer(peerId) && !alreadyNegotiated) return
       makingOfferRef.current.set(peerId, true)
       try {
-        await pc.setLocalDescription(await pc.createOffer())
+        if (force && pc.signalingState !== 'stable') {
+          try {
+            await pc.setLocalDescription({ type: 'rollback' })
+          } catch {
+            /* ignore */
+          }
+        }
+        await pc.setLocalDescription(await pc.createOffer({ iceRestart: force && alreadyNegotiated }))
         if (!alive()) return
         const local = pc.localDescription
         if (!local) return
@@ -432,9 +435,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         window.setTimeout(() => {
           offerRetryTimers.delete(peerId)
           const pc = pcsRef.current.get(peerId)
-          if (!pc || pc.remoteDescription) return
+          if (!pc) return
+          if (pc.connectionState === 'connected') return
           if (!participantsRef.current[peerId] || !participantsRef.current[userId]) return
-          void startOffer(peerId)
+          if (!isOfferer(peerId) && pc.remoteDescription) return
+          void startOffer(peerId, true)
         }, 2500),
       )
     }
@@ -507,16 +512,19 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
       const stream = localStreamRef.current
       const liveTracks = stream?.getTracks().filter((t) => t.readyState !== 'ended') ?? []
-      if (liveTracks.length > 0 && stream) {
-        for (const t of liveTracks) {
-          pc.addTrack(t, stream)
+      try {
+        const audioTx = pc.addTransceiver('audio', { direction: 'sendrecv' })
+        const videoTx = pc.addTransceiver('video', { direction: 'sendrecv' })
+        if (stream && liveTracks.length > 0) {
+          const at = stream.getAudioTracks().find((t) => t.readyState !== 'ended')
+          const vt = stream.getVideoTracks().find((t) => t.readyState !== 'ended')
+          if (at) void audioTx.sender.replaceTrack(at)
+          if (vt) void videoTx.sender.replaceTrack(vt)
         }
-      } else {
-        try {
-          pc.addTransceiver('audio', { direction: 'recvonly' })
-          pc.addTransceiver('video', { direction: 'recvonly' })
-        } catch (e) {
-          console.error('addTransceiver', e)
+      } catch (e) {
+        console.error('addTransceiver', e)
+        if (stream && liveTracks.length > 0) {
+          for (const t of liveTracks) pc.addTrack(t, stream)
         }
       }
       if (screenTrackRef.current && screenStreamRef.current) {
@@ -525,7 +533,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
       void startOffer(peerId)
       scheduleOfferRetry(peerId)
-      listenPeerSignals(peerId)
       upsertRemote(peerId)
       return pc
     }
@@ -541,6 +548,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
       try {
         if (payload.type === 'offer') {
+          if (pc.remoteDescription?.sdp && pc.remoteDescription.sdp === payload.sdp.sdp) return
+
           const makingOffer = makingOfferRef.current.get(from) === true
           const offerCollision = makingOffer || pc.signalingState !== 'stable'
           ignoreOfferRef.current.set(from, !polite && offerCollision)
@@ -563,6 +572,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
             sdp: descInit(pc.localDescription),
           })
         } else if (payload.type === 'answer') {
+          if (pc.remoteDescription?.sdp && pc.remoteDescription.sdp === payload.sdp.sdp) return
           if (pc.signalingState !== 'have-local-offer') return
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
           ignoreOfferRef.current.set(from, false)
@@ -669,13 +679,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           signalUnsubs.clear()
         })
 
-        void get(signalsInRef).then((snap) => {
-          if (!snap.exists() || !alive()) return
-          for (const from of Object.keys(snap.val() as Record<string, unknown>)) {
-            listenPeerSignals(from)
-          }
-        })
-
         const unsubParticipants = onValue(ref(db, `rooms/${roomId}/participants`), (snap) => {
           if (!alive()) return
           const val = (snap.val() as Record<string, Participant> | null) ?? {}
@@ -708,6 +711,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
           for (const peerId of Object.keys(val)) {
             if (peerId === userId) continue
+            listenPeerSignals(peerId)
             ensurePeer(peerId)
           }
         })
@@ -734,6 +738,17 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           setError(`Phòng đã đủ ${MAX_PARTICIPANTS} người`)
           setStatus('error')
           return
+        }
+
+        const joined = (joinTx.snapshot.val() as Record<string, Participant> | null) ?? {
+          [userId]: me,
+        }
+        participantsRef.current = joined
+        setParticipants(joined)
+        for (const peerId of Object.keys(joined)) {
+          if (peerId === userId) continue
+          listenPeerSignals(peerId)
+          ensurePeer(peerId)
         }
 
         await set(ref(db, `rooms/${roomId}/stars/${userId}`), { count: 0, name: me.name })
