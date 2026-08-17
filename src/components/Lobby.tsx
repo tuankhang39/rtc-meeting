@@ -3,6 +3,7 @@ import { BRAND_DESC, BRAND_NAME, BRAND_TAGLINE } from '../lib/brand'
 import { isFirebaseConfigured } from '../lib/firebase'
 import { isHostLoggedIn, loginHost, logoutHost } from '../lib/hostAuth'
 import { randomId } from '../lib/webrtc'
+import { unlockQuickAudio } from '../lib/quickAudio'
 import { ThemeToggle } from './ThemeToggle'
 
 type Props = {
@@ -24,6 +25,7 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
   const enterRoom = (id: string, asHost: boolean) => {
     const display = name.trim() || `Guest-${randomId(3)}`
     localStorage.setItem('rtc-name', display)
+    unlockQuickAudio()
     onJoin(id, display, asHost)
   }
 
