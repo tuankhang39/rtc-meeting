@@ -56,8 +56,44 @@ export function VideoTile({
   useEffect(() => {
     const el = videoRef.current
     if (!el) return
-    if (el.srcObject !== stream) el.srcObject = stream
-    if (stream) void el.play().catch(() => {})
+    const unsubs: Array<() => void> = []
+
+    const bind = () => {
+      if (el.srcObject !== stream) el.srcObject = stream
+      if (stream?.getVideoTracks().some((t) => t.readyState === 'live')) {
+        void el.play().catch(() => {})
+      }
+    }
+
+    const watchTrack = (t: MediaStreamTrack) => {
+      t.addEventListener('unmute', bind)
+      t.addEventListener('mute', bind)
+      t.addEventListener('ended', bind)
+      unsubs.push(() => {
+        t.removeEventListener('unmute', bind)
+        t.removeEventListener('mute', bind)
+        t.removeEventListener('ended', bind)
+      })
+    }
+
+    bind()
+    if (!stream) return
+    stream.addEventListener('addtrack', onAdd)
+    stream.addEventListener('removetrack', bind)
+    for (const t of stream.getTracks()) watchTrack(t)
+
+    function onAdd(ev: MediaStreamTrackEvent) {
+      watchTrack(ev.track)
+      bind()
+    }
+
+    unsubs.push(() => {
+      stream.removeEventListener('addtrack', onAdd)
+      stream.removeEventListener('removetrack', bind)
+    })
+    return () => {
+      for (const off of unsubs) off()
+    }
   }, [stream])
 
   useEffect(() => {

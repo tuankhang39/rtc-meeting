@@ -154,15 +154,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
   const publishScreenTrack = useCallback((track: MediaStreamTrack) => {
     track.contentHint = 'detail'
-    let screen = screenStreamRef.current
-    if (!screen) {
-      screen = new MediaStream()
-      screenStreamRef.current = screen
-    }
-    for (const t of [...screen.getVideoTracks()]) {
-      if (t !== track) screen.removeTrack(t)
-    }
-    if (!screen.getTracks().some((t) => t.id === track.id)) screen.addTrack(track)
+    const screen = new MediaStream([track])
+    screenStreamRef.current = screen
     setScreenStream(screen)
     meshRef.current?.publishScreen(track, localStreamRef.current)
   }, [])
@@ -273,12 +266,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           }
           const sid = m.streamByTrack.get(t.id)
           const camHasVideo = m.camera.getVideoTracks().some((x) => x.id !== t.id && x.readyState !== 'ended')
-          const pMeta = participantsRef.current[peerId]
-          const toScreen = t.kind === 'video' &&
-            (Boolean(cameraSid && sid && sid !== cameraSid && !sid.startsWith('cam:') && !sid.startsWith('mic:')) ||
-              sid?.startsWith('screen:') ||
-              camHasVideo ||
-              (pMeta?.sharing === true && !camHasVideo))
+          const toScreen =
+            t.kind === 'video' &&
+            (sid?.startsWith('screen:') ||
+              Boolean(cameraSid && sid && sid !== cameraSid && !sid.startsWith('cam:') && !sid.startsWith('mic:')) ||
+              camHasVideo)
           const dest = toScreen ? m.screen : m.camera
           const other = dest === m.screen ? m.camera : m.screen
           if (other.getTracks().some((x) => x.id === t.id)) other.removeTrack(t)
@@ -288,6 +280,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       }
       rebalance()
       track.addEventListener('ended', rebalance)
+      track.addEventListener('unmute', () => upsertRemote(peerId))
     }
 
     const mesh = new PeerMesh(
@@ -872,11 +865,9 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       }
       publishScreenTrack(track)
       setScreenSharing(true)
-      meshRef.current?.renegotiateAll()
       await update(ref(getDb(), `rooms/${roomId}/participants/${userId}`), {
         sharing: true,
       })
-      window.setTimeout(() => meshRef.current?.renegotiateAll(), 600)
       return true
     } catch (e) {
       if (!(e instanceof DOMException && e.name === 'NotAllowedError')) {

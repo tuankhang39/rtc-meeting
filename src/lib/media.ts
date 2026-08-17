@@ -44,14 +44,22 @@ export async function acquireScreenShare(): Promise<MediaStreamTrack> {
     throw new Error('Trình duyệt không hỗ trợ share màn hình. Dùng Chrome/Edge.')
   }
   const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
+    video: {
+      frameRate: { ideal: 15, max: 30 },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+    },
     audio: false,
-  })
+    // Tránh share đúng tab họp (Chrome hay ra màn đen / đệ quy)
+    selfBrowserSurface: 'exclude',
+    preferCurrentTab: false,
+  } as DisplayMediaStreamOptions)
   const track = stream.getVideoTracks()[0]
   if (!track) {
     stream.getTracks().forEach((t) => t.stop())
     throw new Error('Không lấy được track màn hình')
   }
+  track.contentHint = 'detail'
   return track
 }
 

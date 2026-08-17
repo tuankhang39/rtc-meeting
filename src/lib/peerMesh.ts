@@ -28,6 +28,8 @@ type PeerEntry = {
   negotiateTimer: number | null
   negotiateForce: boolean
   lastRebuildAt: number
+  audioSender: RTCRtpSender | null
+  cameraSender: RTCRtpSender | null
   screenSender: RTCRtpSender | null
 }
 
@@ -88,6 +90,8 @@ export class PeerMesh {
       negotiateTimer: null,
       negotiateForce: false,
       lastRebuildAt: 0,
+      audioSender: null,
+      cameraSender: null,
       screenSender: null,
     }
     this.peers.set(peerId, entry)
@@ -132,30 +136,43 @@ export class PeerMesh {
     return this.connect(peerId, localStream, screenTrack, false)
   }
 
-  private syncTracks(entry: PeerEntry, localStream: MediaStream | null, screenTrack?: MediaStreamTrack | null) {
-    const { pc } = entry
-    const senders = pc.getSenders()
+  private upsertSender(
+    entry: PeerEntry,
+    slot: 'audioSender' | 'cameraSender',
+    track: MediaStreamTrack,
+    stream: MediaStream,
+  ) {
+    const existing = entry[slot]
+    if (existing) {
+      if (existing.track?.id !== track.id) void existing.replaceTrack(track)
+      return
+    }
+    const reserved = new Set([entry.audioSender, entry.cameraSender, entry.screenSender])
+    const found = entry.pc.getSenders().find((s) => !reserved.has(s) && s.track?.kind === track.kind)
+    if (found && (!found.track || found.track.kind === track.kind)) {
+      entry[slot] = found
+      if (found.track?.id !== track.id) void found.replaceTrack(track)
+      return
+    }
+    entry[slot] = entry.pc.addTrack(track, stream)
+  }
 
+  private syncTracks(entry: PeerEntry, localStream: MediaStream | null, screenTrack?: MediaStreamTrack | null) {
     if (localStream) {
       for (const track of localStream.getTracks()) {
         if (track.readyState === 'ended') continue
-        const sender = senders.find((s) => s.track?.kind === track.kind)
-        if (sender) {
-          if (sender.track?.id !== track.id) void sender.replaceTrack(track)
-        } else {
-          pc.addTrack(track, localStream)
-        }
+        if (track.kind === 'audio') this.upsertSender(entry, 'audioSender', track, localStream)
+        else if (track.kind === 'video') this.upsertSender(entry, 'cameraSender', track, localStream)
       }
     }
 
     if (screenTrack && screenTrack.readyState !== 'ended') {
       if (entry.screenSender) {
-        void entry.screenSender.replaceTrack(screenTrack)
+        if (entry.screenSender.track?.id !== screenTrack.id) void entry.screenSender.replaceTrack(screenTrack)
       } else {
-        const stream = new MediaStream([screenTrack])
-        entry.screenSender = pc.addTrack(screenTrack, stream)
+        entry.screenSender = entry.pc.addTrack(screenTrack, new MediaStream([screenTrack]))
       }
-    } else if (entry.screenSender) {
+    } else if (entry.screenSender?.track) {
       void entry.screenSender.replaceTrack(null)
     }
   }
@@ -275,32 +292,21 @@ export class PeerMesh {
 
   publishScreen(screenTrack: MediaStreamTrack, localStream: MediaStream | null) {
     for (const [peerId, entry] of this.peers) {
-      const hadScreen = Boolean(entry.screenSender?.track)
+      const needNewTransceiver = !entry.screenSender
       if (entry.screenSender) {
         void entry.screenSender.replaceTrack(screenTrack)
       } else {
-        const stream = new MediaStream([screenTrack])
-        entry.screenSender = entry.pc.addTrack(screenTrack, stream)
+        entry.screenSender = entry.pc.addTrack(screenTrack, new MediaStream([screenTrack]))
       }
       this.syncTracks(entry, localStream, screenTrack)
-      if (!hadScreen || entry.screenSender?.track?.id !== screenTrack.id) {
-        this.scheduleNegotiation(peerId, true)
-      }
+      if (needNewTransceiver) this.scheduleNegotiation(peerId, true)
     }
   }
 
   unpublishScreen(localStream: MediaStream | null) {
-    for (const [peerId, entry] of this.peers) {
-      if (entry.screenSender) {
-        try {
-          entry.pc.removeTrack(entry.screenSender)
-        } catch {
-          void entry.screenSender.replaceTrack(null)
-        }
-        entry.screenSender = null
-      }
+    for (const entry of this.peers.values()) {
+      if (entry.screenSender?.track) void entry.screenSender.replaceTrack(null)
       this.syncTracks(entry, localStream, null)
-      this.scheduleNegotiation(peerId, true)
     }
   }
 
