@@ -9,6 +9,7 @@ import {
   IconLeave,
   IconMic,
   IconMicOff,
+  IconRecord,
   IconScreen,
   IconScreenOff,
   IconSend,
@@ -24,6 +25,8 @@ import { ThemeToggle } from './ThemeToggle'
 import { VideoTile } from './VideoTile'
 import { StarBoard } from './StarBoard'
 import { useTeachPip } from '../hooks/useTeachPip'
+import { useClassRecorder } from '../hooks/useClassRecorder'
+import { isHostLoggedIn } from '../lib/hostAuth'
 import type { StickerPackId } from '../lib/stickers'
 
 type Props = {
@@ -174,6 +177,23 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     return null
   }, [displayName, micOn, remotes, screenSharing, screenStream])
 
+  const canAdminRecord = isHost && isHostLoggedIn()
+  const {
+    recording,
+    elapsedLabel,
+    canRecord,
+    startRecording,
+    stopRecording,
+  } = useClassRecorder({
+    enabled: canAdminRecord,
+    roomId,
+    localStream,
+    remotes,
+    onCaptureEnded: () => {
+      push('Đã dừng ghi (màn hình bị đóng). File đã lưu nếu có.', 'ok')
+    },
+  })
+
   useEffect(() => {
     if (!stage) {
       setSelectedSticker(null)
@@ -182,8 +202,28 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   }, [stage])
 
   const handleLeave = async () => {
+    if (recording) await stopRecording()
     await leave()
     onLeave()
+  }
+
+  const onToggleRecord = async () => {
+    if (recording) {
+      const blob = await stopRecording()
+      if (blob && blob.size > 0) push('Đã lưu file ghi màn hình (.webm)', 'ok')
+      else push('Đã dừng ghi', 'ok')
+      return
+    }
+    try {
+      await startRecording()
+      push('Chọn **Toàn màn hình** — ghi cả desktop + tiếng lớp học', 'ok')
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'NotAllowedError') {
+        push('Đã hủy chọn màn hình', 'warn')
+        return
+      }
+      push(e instanceof Error ? e.message : 'Không bắt đầu ghi được', 'warn')
+    }
   }
 
   const copyLink = async () => {
@@ -333,6 +373,11 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           <strong className="brand">{BRAND_SHORT}</strong>
           <span className="muted"> / {roomName ? `${roomName} · ${roomId}` : roomId}</span>
           {isHost && <span className="pill host-pill">Host</span>}
+          {recording && (
+            <span className="pill record-pill" title="Đang ghi màn hình máy (local)">
+              ● REC {elapsedLabel}
+            </span>
+          )}
         </div>
         <div className="room-bar-right">
           <ThemeToggle className="theme-toggle-compact" />
@@ -483,180 +528,208 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             }}
           />
         )}
-        {isHost && (
-        <button
-          type="button"
-          className={`btn control-btn ${showStars ? 'active-share' : ''}`}
-          onClick={() => {
-            setShowStars((v) => !v)
-            setShowReactions(false)
-            setShowPlayfulPanel(false)
-            setShowQuickComments(false)
-            setShowStickerPanel(false)
-          }}
-          title="Tặng sao, xem điểm buổi học"
-          aria-label="Tặng sao"
-        >
-          <span className="react-face" aria-hidden>
-            ⭐
-          </span>
-          <span>Sao</span>
-        </button>
-        )}
-        <button
-          type="button"
-          className={`btn control-btn ${micOn ? '' : 'danger'}`}
-          onClick={() => void toggleMic()}
-          title={micOn ? 'Tắt mic' : 'Bật mic'}
-          aria-label={micOn ? 'Tắt mic' : 'Bật mic'}
-        >
-          {micOn ? <IconMic /> : <IconMicOff />}
-          <span>{micOn ? 'Mic' : 'Unmute'}</span>
-        </button>
-        <button
-          type="button"
-          className={`btn control-btn ${camOn ? '' : 'danger'}`}
-          onClick={() => void toggleCam()}
-          title={camOn ? 'Tắt camera' : 'Bật camera'}
-          aria-label={camOn ? 'Tắt camera' : 'Bật camera'}
-        >
-          {camOn ? <IconCam /> : <IconCamOff />}
-          <span>{camOn ? 'Cam' : 'Cam off'}</span>
-        </button>
-        <button
-          type="button"
-          className={`btn control-btn ${showReactions ? 'active-share' : ''}`}
-          onClick={() => {
-            setShowReactions((v) => !v)
-            setShowStickerPanel(false)
-            setShowPlayfulPanel(false)
-            setShowQuickComments(false)
-            setShowStars(false)
-          }}
-          title="Reaction vui"
-          aria-label="Reaction"
-        >
-          <span className="react-face" aria-hidden>
-            😊
-          </span>
-          <span>React</span>
-        </button>
-        <button
-          type="button"
-          className={`btn control-btn ${showPlayfulPanel ? 'active-share' : ''}`}
-          onClick={() => {
-            setShowPlayfulPanel((v) => !v)
-            setShowReactions(false)
-            setShowStickerPanel(false)
-            setShowQuickComments(false)
-            setShowStars(false)
-          }}
-          title="Chọc ghẹo, tặng hoa, phê bình"
-          aria-label="Chọc ghẹo"
-        >
-          <span className="react-face" aria-hidden>
-            🎭
-          </span>
-          <span>Chọc</span>
-        </button>
-        {isHost && (
-        <button
-          type="button"
-          className={`btn control-btn ${showQuickComments ? 'active-share' : ''}`}
-          onClick={() => {
-            unlockQuickAudio()
-            setShowQuickComments((v) => !v)
-            setShowReactions(false)
-            setShowStickerPanel(false)
-            setShowPlayfulPanel(false)
-            setShowStars(false)
-          }}
-          title="Bình luận nhanh buổi học"
-          aria-label="Bình luận nhanh"
-        >
-          <span className="react-face" aria-hidden>
-            📢
-          </span>
-          <span>Nhanh</span>
-        </button>
-        )}
-        {stage && (
-          <button
-            type="button"
-            className={`btn control-btn ${showStickerPanel || selectedSticker ? 'active-share' : ''}`}
-            onClick={() => {
-              setShowStickerPanel((v) => !v)
-              setShowReactions(false)
-              setShowPlayfulPanel(false)
-              setShowQuickComments(false)
-              setShowStars(false)
-              if (showStickerPanel) setSelectedSticker(null)
-            }}
-            title="Sticker trên màn share"
-            aria-label="Sticker"
-          >
-            <span className="react-face" aria-hidden>
-              🎀
-            </span>
-            <span>Sticker</span>
-          </button>
-        )}
-        {stage && canClearStickers && (
-          <button
-            type="button"
-            className="btn control-btn"
-            disabled={screenStickers.length === 0}
-            onClick={handleClearStickers}
-            title="Xóa hết sticker trên màn hình"
-            aria-label="Xóa hết sticker"
-          >
-            <span className="react-face" aria-hidden>
-              🧹
-            </span>
-            <span>{screenStickers.length > 0 ? `Xóa (${screenStickers.length})` : 'Xóa sticker'}</span>
-          </button>
-        )}
-        {screenSharing && (
-          <button
-            type="button"
-            className={`btn control-btn ${teachPip.open ? 'active-share' : ''}`}
-            onClick={() => {
-              if (teachPip.open) teachPip.close()
-              else {
-                void teachPip.openPip().then((ok) => {
-                  if (!ok) push('Cửa sổ học viên cần Chrome hoặc Edge mới', 'warn')
-                })
-              }
-            }}
-            title="Ghim hộp học viên lên màn hình khi dạy"
-            aria-label="Hộp học viên"
-          >
-            <span className="react-face" aria-hidden>
-              👥
-            </span>
-            <span>{teachPip.open ? 'Đóng hộp' : 'Học viên'}</span>
-          </button>
-        )}
-        <button
-          type="button"
-          className={`btn control-btn ${screenSharing ? 'active-share' : ''}`}
-          onClick={() => void onToggleShare()}
-          title={screenSharing ? 'Dừng share' : 'Share màn hình'}
-          aria-label={screenSharing ? 'Dừng share' : 'Share màn hình'}
-        >
-          {screenSharing ? <IconScreenOff /> : <IconScreen />}
-          <span>{screenSharing ? 'Dừng' : 'Share'}</span>
-        </button>
-        <button
-          type="button"
-          className="btn control-btn danger leave"
-          onClick={() => void handleLeave()}
-          title="Rời phòng"
-          aria-label="Rời phòng"
-        >
-          <IconLeave />
-          <span>Rời</span>
-        </button>
+
+        <div className="controls-toolbar">
+          <div className="controls-primary" aria-label="Điều khiển chính">
+            <button
+              type="button"
+              className={`btn control-btn ${micOn ? '' : 'danger'}`}
+              onClick={() => void toggleMic()}
+              title={micOn ? 'Tắt mic' : 'Bật mic'}
+              aria-label={micOn ? 'Tắt mic' : 'Bật mic'}
+            >
+              {micOn ? <IconMic /> : <IconMicOff />}
+              <span>{micOn ? 'Mic' : 'Unmute'}</span>
+            </button>
+            <button
+              type="button"
+              className={`btn control-btn ${camOn ? '' : 'danger'}`}
+              onClick={() => void toggleCam()}
+              title={camOn ? 'Tắt camera' : 'Bật camera'}
+              aria-label={camOn ? 'Tắt camera' : 'Bật camera'}
+            >
+              {camOn ? <IconCam /> : <IconCamOff />}
+              <span>{camOn ? 'Cam' : 'Cam off'}</span>
+            </button>
+            <button
+              type="button"
+              className={`btn control-btn ${screenSharing ? 'active-share' : ''}`}
+              onClick={() => void onToggleShare()}
+              title={screenSharing ? 'Dừng share' : 'Share màn hình'}
+              aria-label={screenSharing ? 'Dừng share' : 'Share màn hình'}
+            >
+              {screenSharing ? <IconScreenOff /> : <IconScreen />}
+              <span>{screenSharing ? 'Dừng share' : 'Share'}</span>
+            </button>
+            {canAdminRecord && canRecord && (
+              <button
+                type="button"
+                className={`btn control-btn ${recording ? 'recording-active danger' : ''}`}
+                onClick={() => void onToggleRecord()}
+                title={
+                  recording
+                    ? 'Dừng ghi và tải file .webm về máy'
+                    : 'Ghi toàn màn hình máy (chọn Entire screen) + tiếng lớp'
+                }
+                aria-label={recording ? 'Dừng ghi màn hình' : 'Ghi màn hình'}
+              >
+                <IconRecord active={recording} />
+                <span>{recording ? `Dừng ${elapsedLabel}` : 'Ghi màn'}</span>
+              </button>
+            )}
+          </div>
+
+          <div className="controls-extra" aria-label="Công cụ bổ trợ">
+            {screenSharing && (
+              <button
+                type="button"
+                className={`btn control-btn ${teachPip.open ? 'active-share' : ''}`}
+                onClick={() => {
+                  if (teachPip.open) teachPip.close()
+                  else {
+                    void teachPip.openPip().then((ok) => {
+                      if (!ok) push('Cửa sổ học viên cần Chrome hoặc Edge mới', 'warn')
+                    })
+                  }
+                }}
+                title="Ghim hộp học viên lên màn hình khi dạy"
+                aria-label="Hộp học viên"
+              >
+                <span className="react-face" aria-hidden>
+                  👥
+                </span>
+                <span>{teachPip.open ? 'Đóng hộp' : 'Học viên'}</span>
+              </button>
+            )}
+            {stage && (
+              <button
+                type="button"
+                className={`btn control-btn ${showStickerPanel || selectedSticker ? 'active-share' : ''}`}
+                onClick={() => {
+                  setShowStickerPanel((v) => !v)
+                  setShowReactions(false)
+                  setShowPlayfulPanel(false)
+                  setShowQuickComments(false)
+                  setShowStars(false)
+                  if (showStickerPanel) setSelectedSticker(null)
+                }}
+                title="Sticker trên màn share"
+                aria-label="Sticker"
+              >
+                <span className="react-face" aria-hidden>
+                  🎀
+                </span>
+                <span>Sticker</span>
+              </button>
+            )}
+            {stage && canClearStickers && (
+              <button
+                type="button"
+                className="btn control-btn"
+                disabled={screenStickers.length === 0}
+                onClick={handleClearStickers}
+                title="Xóa hết sticker trên màn hình"
+                aria-label="Xóa hết sticker"
+              >
+                <span className="react-face" aria-hidden>
+                  🧹
+                </span>
+                <span>{screenStickers.length > 0 ? `Xóa (${screenStickers.length})` : 'Xóa sticker'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className={`btn control-btn ${showReactions ? 'active-share' : ''}`}
+              onClick={() => {
+                setShowReactions((v) => !v)
+                setShowStickerPanel(false)
+                setShowPlayfulPanel(false)
+                setShowQuickComments(false)
+                setShowStars(false)
+              }}
+              title="Reaction vui"
+              aria-label="Reaction"
+            >
+              <span className="react-face" aria-hidden>
+                😊
+              </span>
+              <span>React</span>
+            </button>
+            <button
+              type="button"
+              className={`btn control-btn ${showPlayfulPanel ? 'active-share' : ''}`}
+              onClick={() => {
+                setShowPlayfulPanel((v) => !v)
+                setShowReactions(false)
+                setShowStickerPanel(false)
+                setShowQuickComments(false)
+                setShowStars(false)
+              }}
+              title="Chọc ghẹo, tặng hoa, phê bình"
+              aria-label="Chọc ghẹo"
+            >
+              <span className="react-face" aria-hidden>
+                🎭
+              </span>
+              <span>Chọc</span>
+            </button>
+            {isHost && (
+              <button
+                type="button"
+                className={`btn control-btn ${showQuickComments ? 'active-share' : ''}`}
+                onClick={() => {
+                  unlockQuickAudio()
+                  setShowQuickComments((v) => !v)
+                  setShowReactions(false)
+                  setShowStickerPanel(false)
+                  setShowPlayfulPanel(false)
+                  setShowStars(false)
+                }}
+                title="Bình luận nhanh buổi học"
+                aria-label="Bình luận nhanh"
+              >
+                <span className="react-face" aria-hidden>
+                  📢
+                </span>
+                <span>Nhanh</span>
+              </button>
+            )}
+            {isHost && (
+              <button
+                type="button"
+                className={`btn control-btn ${showStars ? 'active-share' : ''}`}
+                onClick={() => {
+                  setShowStars((v) => !v)
+                  setShowReactions(false)
+                  setShowPlayfulPanel(false)
+                  setShowQuickComments(false)
+                  setShowStickerPanel(false)
+                }}
+                title="Tặng sao, xem điểm buổi học"
+                aria-label="Tặng sao"
+              >
+                <span className="react-face" aria-hidden>
+                  ⭐
+                </span>
+                <span>Sao</span>
+              </button>
+            )}
+          </div>
+
+          <div className="controls-leave">
+            <button
+              type="button"
+              className="btn control-btn danger leave"
+              onClick={() => void handleLeave()}
+              title="Rời phòng"
+              aria-label="Rời phòng"
+            >
+              <IconLeave />
+              <span>Rời</span>
+            </button>
+          </div>
+        </div>
+
         {status === 'connecting' && <span className="muted">Đang kết nối…</span>}
       </footer>
     </div>

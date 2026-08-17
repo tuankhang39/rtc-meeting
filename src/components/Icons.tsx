@@ -154,3 +154,21 @@ export function IconSend({ size = 18, className }: IconProps) {
     </svg>
   )
 }
+
+export function IconRecord({ size = 22, className, active = false }: IconProps & { active?: boolean }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        fill={active ? 'currentColor' : 'none'}
+      />
+      {active ? null : (
+        <circle cx="12" cy="12" r="4" fill="currentColor" />
+      )}
+    </svg>
+  )
+}
