@@ -25,6 +25,8 @@ type PeerEntry = {
   ignoreOffer: boolean
   iceQueue: RTCIceCandidateInit[]
   retryTimer: number | null
+  negotiateTimer: number | null
+  negotiateForce: boolean
   lastRebuildAt: number
   screenSender: RTCRtpSender | null
 }
@@ -68,19 +70,37 @@ export class PeerMesh {
     if (entry) {
       const dead = entry.pc.connectionState === 'closed' || entry.pc.connectionState === 'failed'
       if (!dead) {
+        const hadScreen = Boolean(entry.screenSender?.track)
         this.syncTracks(entry, localStream, screenTrack)
+        if (!hadScreen && entry.screenSender?.track) this.scheduleNegotiation(peerId, true)
         return entry.pc
       }
       this.disconnect(peerId, false)
     }
 
     const pc = this.createPc()
-    entry = { pc, makingOffer: false, ignoreOffer: false, iceQueue: [], retryTimer: null, lastRebuildAt: 0, screenSender: null }
+    entry = {
+      pc,
+      makingOffer: false,
+      ignoreOffer: false,
+      iceQueue: [],
+      retryTimer: null,
+      negotiateTimer: null,
+      negotiateForce: false,
+      lastRebuildAt: 0,
+      screenSender: null,
+    }
     this.peers.set(peerId, entry)
 
     pc.ontrack = (ev) => this.events.onTrack(peerId, ev)
     pc.onicecandidate = (ev) => {
       this.events.onSignal(peerId, { type: 'candidate', candidate: ev.candidate?.toJSON() ?? null })
+    }
+    pc.onnegotiationneeded = () => {
+      if (this.peers.get(peerId)?.pc !== pc) return
+      const negotiated = Boolean(pc.remoteDescription)
+      if (!negotiated && !this.isOfferer(peerId)) return
+      this.scheduleNegotiation(peerId, negotiated)
     }
     pc.onconnectionstatechange = () => {
       if (this.peers.get(peerId)?.pc !== pc) return
@@ -209,8 +229,14 @@ export class PeerMesh {
     const entry = this.peers.get(peerId)
     if (!entry) return
     const { pc } = entry
-    if (pc.signalingState !== 'stable') return
-    if (entry.makingOffer) return
+    if (pc.signalingState !== 'stable') {
+      this.scheduleNegotiation(peerId, force)
+      return
+    }
+    if (entry.makingOffer) {
+      this.scheduleNegotiation(peerId, force)
+      return
+    }
 
     const negotiated = Boolean(pc.currentRemoteDescription ?? pc.remoteDescription)
     if (!force && !negotiated && !this.isOfferer(peerId)) return
@@ -223,17 +249,33 @@ export class PeerMesh {
       this.events.onSignal(peerId, { type: 'offer', sdp: this.desc(local) })
     } catch (err) {
       console.error('maybeOffer', peerId, err)
+      this.scheduleNegotiation(peerId, force)
     } finally {
       entry.makingOffer = false
+      if (entry.negotiateForce) this.scheduleNegotiation(peerId, entry.negotiateForce)
     }
   }
 
+  private scheduleNegotiation(peerId: string, force = false) {
+    const entry = this.peers.get(peerId)
+    if (!entry) return
+    entry.negotiateForce = entry.negotiateForce || force
+    if (entry.negotiateTimer) return
+    entry.negotiateTimer = window.setTimeout(() => {
+      entry.negotiateTimer = null
+      const forceNow = entry.negotiateForce
+      entry.negotiateForce = false
+      void this.maybeOffer(peerId, forceNow)
+    }, 80)
+  }
+
   renegotiateAll() {
-    for (const id of this.peers.keys()) void this.maybeOffer(id, true)
+    for (const id of this.peers.keys()) this.scheduleNegotiation(id, true)
   }
 
   publishScreen(screenTrack: MediaStreamTrack, localStream: MediaStream | null) {
     for (const [peerId, entry] of this.peers) {
+      const hadScreen = Boolean(entry.screenSender?.track)
       if (entry.screenSender) {
         void entry.screenSender.replaceTrack(screenTrack)
       } else {
@@ -241,15 +283,24 @@ export class PeerMesh {
         entry.screenSender = entry.pc.addTrack(screenTrack, stream)
       }
       this.syncTracks(entry, localStream, screenTrack)
-      void this.maybeOffer(peerId, true)
+      if (!hadScreen || entry.screenSender?.track?.id !== screenTrack.id) {
+        this.scheduleNegotiation(peerId, true)
+      }
     }
   }
 
   unpublishScreen(localStream: MediaStream | null) {
-    for (const [, entry] of this.peers) {
-      if (entry.screenSender) void entry.screenSender.replaceTrack(null)
-      entry.screenSender = null
+    for (const [peerId, entry] of this.peers) {
+      if (entry.screenSender) {
+        try {
+          entry.pc.removeTrack(entry.screenSender)
+        } catch {
+          void entry.screenSender.replaceTrack(null)
+        }
+        entry.screenSender = null
+      }
       this.syncTracks(entry, localStream, null)
+      this.scheduleNegotiation(peerId, true)
     }
   }
 
@@ -261,6 +312,10 @@ export class PeerMesh {
     const entry = this.peers.get(peerId)
     if (!entry) return
     this.clearRetry(peerId)
+    if (entry.negotiateTimer) {
+      window.clearTimeout(entry.negotiateTimer)
+      entry.negotiateTimer = null
+    }
     try {
       entry.pc.close()
     } catch {

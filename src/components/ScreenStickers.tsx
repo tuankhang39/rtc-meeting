@@ -64,7 +64,7 @@ export function ScreenStickerOverlay({
             onClear()
           }}
         >
-          Xóa sticker
+          Xóa hết
         </button>
       )}
 
@@ -78,13 +78,35 @@ type PickerProps = {
   selectedEmoji: string | null
   onPackChange: (id: StickerPackId) => void
   onSelect: (emoji: string | null) => void
+  canClear?: boolean
+  stickerCount?: number
+  onClear?: () => void
 }
 
-export function StickerPackPicker({ packId, selectedEmoji, onPackChange, onSelect }: PickerProps) {
+export function StickerPackPicker({
+  packId,
+  selectedEmoji,
+  onPackChange,
+  onSelect,
+  canClear = false,
+  stickerCount = 0,
+  onClear,
+}: PickerProps) {
   const pack = STICKER_PACKS.find((p) => p.id === packId) ?? STICKER_PACKS[0]!
 
   return (
     <div className="sticker-picker">
+      {canClear && (
+        <button
+          type="button"
+          className="sticker-clear-quick"
+          disabled={stickerCount === 0}
+          onClick={() => onClear?.()}
+          title="Xóa hết sticker trên màn hình"
+        >
+          🧹 Xóa hết {stickerCount > 0 ? `(${stickerCount})` : ''}
+        </button>
+      )}
       <div className="sticker-pack-tabs">
         {STICKER_PACKS.map((p) => (
           <button

@@ -314,6 +314,15 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     }
   }
 
+  const canClearStickers = isHost || screenSharing
+
+  const handleClearStickers = () => {
+    if (screenStickers.length === 0) return
+    void clearScreenStickers()
+    setSelectedSticker(null)
+    push('Đã xóa hết sticker trên màn hình', 'ok')
+  }
+
   return (
     <div className="room">
       <ToastStack toasts={toasts} onDismiss={dismiss} />
@@ -356,15 +365,12 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 selectedEmoji={selectedSticker}
                 selectedPack={stickerPack}
                 myUserId={userId}
-                canClear={isHost || screenSharing}
+                canClear={canClearStickers}
                 onPlace={(emoji, pack, x, y) => {
                   void placeScreenSticker(emoji, pack, x, y)
                 }}
                 onRemove={(id) => void removeScreenSticker(id)}
-                onClear={() => {
-                  void clearScreenStickers()
-                  push('Đã xóa sticker trên màn share', 'ok')
-                }}
+                onClear={handleClearStickers}
               />
               <ScreenDrawOverlay strokes={drawStrokes} board={drawBoard} />
               {showStickerPanel && (
@@ -373,6 +379,9 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                   selectedEmoji={selectedSticker}
                   onPackChange={setStickerPack}
                   onSelect={setSelectedSticker}
+                  canClear={canClearStickers}
+                  stickerCount={screenStickers.length}
+                  onClear={handleClearStickers}
                 />
               )}
             </div>
@@ -590,6 +599,21 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               🎀
             </span>
             <span>Sticker</span>
+          </button>
+        )}
+        {stage && canClearStickers && (
+          <button
+            type="button"
+            className="btn control-btn"
+            disabled={screenStickers.length === 0}
+            onClick={handleClearStickers}
+            title="Xóa hết sticker trên màn hình"
+            aria-label="Xóa hết sticker"
+          >
+            <span className="react-face" aria-hidden>
+              🧹
+            </span>
+            <span>{screenStickers.length > 0 ? `Xóa (${screenStickers.length})` : 'Xóa sticker'}</span>
           </button>
         )}
         {screenSharing && (

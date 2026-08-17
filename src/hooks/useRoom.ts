@@ -213,7 +213,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       const screenLive = Boolean(media?.screen.getVideoTracks().some((t) => t.readyState !== 'ended'))
       const audioTrack = media?.camera.getAudioTracks().find((t) => t.readyState !== 'ended')
       const videoTrack = media?.camera.getVideoTracks().find((t) => t.readyState !== 'ended')
-      const hasMedia = Boolean(audioTrack || videoTrack)
+      const screenTrack = media?.screen.getVideoTracks().find((t) => t.readyState !== 'ended')
+      const hasMedia = Boolean(audioTrack || videoTrack || screenTrack)
       const pc = meshRef.current?.getConnection(peerId)
       const peer: RemotePeer = {
         userId: peerId,
@@ -225,7 +226,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         screenStream: screenLive ? media!.screen : null,
         link: pc?.connectionState ?? 'none',
         hasAudio: Boolean(audioTrack),
-        hasVideo: Boolean(videoTrack),
+        hasVideo: Boolean(videoTrack || screenTrack),
       }
       setRemotes((prev) => {
         if (!prev.some((p) => p.userId === peerId)) return [...prev, peer]
@@ -245,11 +246,16 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         media.streamByTrack.set(track.id, inbound.id)
       } else {
         const pc = meshRef.current?.getConnection(peerId)
-        const videos = pc?.getTransceivers()
-          .map((t) => t.receiver.track)
-          .filter((t) => t.kind === 'video' && t.readyState !== 'ended') ?? []
-        const videoIdx = videos.findIndex((t) => t.id === track.id)
-        media.streamByTrack.set(track.id, track.kind === 'audio' || videoIdx <= 0 ? `cam:${peerId}` : `screen:${peerId}`)
+        const videoReceivers = pc?.getTransceivers()
+          .filter((t) => t.receiver.track?.kind === 'video' && t.receiver.track.readyState !== 'ended') ?? []
+        const videoIdx = videoReceivers.findIndex((t) => t.receiver.track?.id === track.id)
+        if (track.kind === 'video' && videoIdx > 0) {
+          media.streamByTrack.set(track.id, `screen:${peerId}`)
+        } else if (track.kind === 'video') {
+          media.streamByTrack.set(track.id, `cam:${peerId}`)
+        } else {
+          media.streamByTrack.set(track.id, `mic:${peerId}`)
+        }
       }
 
       const rebalance = () => {
@@ -269,8 +275,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           const camHasVideo = m.camera.getVideoTracks().some((x) => x.id !== t.id && x.readyState !== 'ended')
           const pMeta = participantsRef.current[peerId]
           const toScreen = t.kind === 'video' &&
-            (Boolean(cameraSid && sid && sid !== cameraSid) || camHasVideo ||
-              (pMeta?.sharing === true && pMeta.camera === false && !camHasVideo))
+            (Boolean(cameraSid && sid && sid !== cameraSid && !sid.startsWith('cam:') && !sid.startsWith('mic:')) ||
+              sid?.startsWith('screen:') ||
+              camHasVideo ||
+              (pMeta?.sharing === true && !camHasVideo))
           const dest = toScreen ? m.screen : m.camera
           const other = dest === m.screen ? m.camera : m.screen
           if (other.getTracks().some((x) => x.id === t.id)) other.removeTrack(t)
@@ -430,9 +438,22 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
               const meta = val[r.userId]
               if (!meta) return r
               const sharing = meta.sharing ?? false
-              return { ...r, name: meta.name, mic: meta.mic, camera: meta.camera, sharing, screenStream: sharing ? r.screenStream : null }
+              const m = remoteMediaRef.current.get(r.userId)
+              const screenLive = Boolean(m?.screen.getVideoTracks().some((t) => t.readyState !== 'ended'))
+              return {
+                ...r,
+                name: meta.name,
+                mic: meta.mic,
+                camera: meta.camera,
+                sharing: sharing || screenLive,
+                screenStream: sharing || screenLive ? (r.screenStream ?? (screenLive ? m!.screen : null)) : null,
+              }
             }),
           )
+
+          for (const peerId of Object.keys(val)) {
+            if (peerId !== userId && val[peerId]?.sharing) upsertRemote(peerId)
+          }
 
           for (const peerId of mesh.peerIds()) {
             if (!val[peerId]) disconnectPeer(peerId, true)
@@ -851,9 +872,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       }
       publishScreenTrack(track)
       setScreenSharing(true)
+      meshRef.current?.renegotiateAll()
       await update(ref(getDb(), `rooms/${roomId}/participants/${userId}`), {
         sharing: true,
       })
+      window.setTimeout(() => meshRef.current?.renegotiateAll(), 600)
       return true
     } catch (e) {
       if (!(e instanceof DOMException && e.name === 'NotAllowedError')) {

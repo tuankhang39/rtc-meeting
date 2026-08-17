@@ -1657,6 +1657,25 @@
   cursor: pointer;
 }
 
+.sticker-clear-quick {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  border: 1px dashed rgba(200, 150, 170, 0.55);
+  background: rgba(255, 245, 248, 0.95);
+  color: var(--accent-deep);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sticker-clear-quick:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .draw-overlay {
   position: absolute;
   inset: 0;
@@ -2098,6 +2117,12 @@
   background: rgba(22, 26, 34, 0.96);
   border-color: rgba(148, 163, 184, 0.22);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme='dark'] .sticker-clear-quick {
+  background: rgba(30, 35, 46, 0.95);
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f8c8d8;
 }
 
 [data-theme='dark'] .reaction-chip:hover,
