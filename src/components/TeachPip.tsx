@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useSpeaking } from '../hooks/useSpeaking'
+import { useVideoStream } from '../hooks/useVideoStream'
 import { QUICK_COMMENTS, type QuickComment } from '../lib/quickComments'
 import { IconCam, IconCamOff, IconMic, IconMicOff, IconScreenOff } from './Icons'
 
@@ -53,12 +54,7 @@ function StripTile({
   const showVideo = person.camOn && Boolean(person.stream)
   const stars = person.stars ?? 0
 
-  useEffect(() => {
-    const el = videoRef.current
-    if (!el) return
-    if (el.srcObject !== person.stream) el.srcObject = person.stream
-    if (person.stream) void el.play().catch(() => {})
-  }, [person.stream])
+  useVideoStream(videoRef, person.stream)
 
   return (
     <div className={`teach-strip-tile${speaking ? ' is-speaking' : ''}${showVideo ? '' : ' cam-off'}`}>

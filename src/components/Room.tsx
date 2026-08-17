@@ -126,21 +126,17 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         const p = participants[id]
         const r = remotes.find((x) => x.userId === id)
         const sharing = p?.sharing ?? r?.sharing ?? false
-        const stream = r?.stream ?? null
-        const screenStream = r?.screenStream ?? null
-        const sameAsScreen = Boolean(sharing && screenStream && stream && stream.id === screenStream.id)
-        const camStream = sharing && (sameAsScreen || !screenStream) ? null : stream
         const linked = r?.link === 'connected'
         const hasMedia = Boolean(r?.hasAudio || r?.hasVideo)
         return {
           userId: id,
           name: p?.name ?? r?.name ?? id.slice(0, 6),
           mic: r?.hasAudio ? r.mic : (p?.mic ?? false),
-          camera: r?.hasVideo ? r.camera && Boolean(camStream) : false,
+          camera: Boolean(r?.camLive) && p?.camera !== false,
           sharing,
           isHost: p?.isHost === true,
-          camStream,
-          stream,
+          camStream: r?.stream ?? null,
+          stream: r?.stream ?? null,
           linked,
           connecting: !hasMedia || !linked,
           joinedAt: p?.joinedAt ?? 0,
@@ -163,19 +159,21 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
 
   const stage = useMemo(() => {
     if (screenSharing && screenStream) {
-      return { stream: screenStream, label: `${displayName} · màn hình`, micOn, sharing: true }
+      return { stream: screenStream, label: `${displayName} · màn hình`, micOn, sharing: true, waiting: false }
     }
-    const remoteSharer = remotes.find((r) => r.sharing && (r.screenStream || r.stream))
-    if (remoteSharer) {
-      return {
-        stream: remoteSharer.screenStream ?? remoteSharer.stream,
-        label: `${remoteSharer.name} · màn hình`,
-        micOn: remoteSharer.mic,
-        sharing: true,
-      }
+    // Ai đang share lấy theo trạng thái phòng, còn hình lấy theo track có dữ liệu thật.
+    const sharer = otherPeople.find((p) => p.sharing)
+    if (!sharer) return null
+    const remote = remotes.find((r) => r.userId === sharer.userId)
+    const ready = Boolean(remote?.screenLive && remote.screenStream)
+    return {
+      stream: ready ? remote!.screenStream : null,
+      label: `${sharer.name} · màn hình`,
+      micOn: sharer.mic,
+      sharing: true,
+      waiting: !ready,
     }
-    return null
-  }, [displayName, micOn, remotes, screenSharing, screenStream])
+  }, [displayName, micOn, otherPeople, remotes, screenSharing, screenStream])
 
   const canAdminRecord = isHost && isHostLoggedIn()
   const {
@@ -395,16 +393,28 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         {stage ? (
           <section className="stage-layout">
             <div className="stage-main stage-with-stickers">
-              <VideoTile
-                stream={stage.stream}
-                audioStream={screenSharing ? localStream : undefined}
-                muted={screenSharing}
-                label={stage.label}
-                micOn={stage.micOn}
-                camOn
-                sharing
-                fit="contain"
-              />
+              {stage.waiting ? (
+                <div className="tile tile-stage tile-sharing">
+                  <div className="tile-media stage-wait">
+                    <p>Đang nhận màn hình…</p>
+                    <span className="muted">Chờ kết nối share</span>
+                  </div>
+                  <div className="tile-meta">
+                    <span>{stage.label}</span>
+                  </div>
+                </div>
+              ) : (
+                <VideoTile
+                  stream={stage.stream}
+                  audioStream={screenSharing ? localStream : undefined}
+                  muted={screenSharing}
+                  label={stage.label}
+                  micOn={stage.micOn}
+                  camOn
+                  sharing
+                  fit="contain"
+                />
+              )}
               <ScreenStickerOverlay
                 stickers={screenStickers}
                 selectedEmoji={selectedSticker}

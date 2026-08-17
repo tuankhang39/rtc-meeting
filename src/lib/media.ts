@@ -7,6 +7,17 @@ export type LocalMedia = {
   warning: string | null
 }
 
+/**
+ * Mesh không có SFU: mỗi người phải encode + upload 1 bản cho từng peer.
+ * 360p/24fps là mức chạy mượt trên laptop yếu và mạng nhà.
+ */
+const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  facingMode: 'user',
+  width: { ideal: 640, max: 1280 },
+  height: { ideal: 360, max: 720 },
+  frameRate: { ideal: 24, max: 30 },
+}
+
 function isDomError(e: unknown, name: string) {
   return e instanceof DOMException && e.name === name
 }
@@ -70,9 +81,11 @@ export async function acquireLocalMedia(): Promise<LocalMedia> {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: CAMERA_CONSTRAINTS,
     })
+    const cam = stream.getVideoTracks()[0]
+    if (cam) cam.contentHint = 'motion'
     return { stream, mic: true, camera: true, warning: null }
   } catch {
     try {
@@ -82,7 +95,9 @@ export async function acquireLocalMedia(): Promise<LocalMedia> {
       return { stream, mic: true, camera: false, warning: null }
     } catch {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true })
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: CAMERA_CONSTRAINTS })
+        const cam = stream.getVideoTracks()[0]
+        if (cam) cam.contentHint = 'motion'
         return { stream, mic: false, camera: true, warning: null }
       } catch {
         return { stream: new MediaStream(), mic: false, camera: false, warning: 'Không mở được camera và mic. Kiểm tra quyền trình duyệt / thiết bị rồi tải lại trang.' }

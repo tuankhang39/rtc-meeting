@@ -942,6 +942,16 @@
   background: linear-gradient(165deg, #f0e4ea, #e8d8e0);
 }
 
+.stage-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 240px;
+  text-align: center;
+}
+
 .tile video {
   width: 100%;
   height: 100%;

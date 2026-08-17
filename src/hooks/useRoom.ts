@@ -25,7 +25,7 @@ import { playQuickCommentSound, unlockQuickAudio } from '../lib/quickAudio'
 import type { DrawStroke } from '../lib/draw'
 import type { ScreenSticker, StickerPackId } from '../lib/stickers'
 import { MAX_PARTICIPANTS, createPeerConnection, randomId } from '../lib/webrtc'
-import { PeerMesh, type SignalPayload } from '../lib/peerMesh'
+import { PeerMesh, type SignalPayload, type TrackRole } from '../lib/peerMesh'
 import { markRoomEmptyIfNeeded, markRoomOccupied, sweepEmptyRooms } from '../lib/rooms'
 
 export type Participant = {
@@ -66,7 +66,9 @@ const CUTE_HELLO = [
 
 export type RemotePeer = {
   userId: string
+  /** Stream cam+mic — object cố định, không đổi khi bật/tắt cam. */
   stream: MediaStream | null
+  /** Stream màn hình — object cố định, không đổi khi bật/tắt share. */
   screenStream: MediaStream | null
   name: string
   mic: boolean
@@ -75,6 +77,10 @@ export type RemotePeer = {
   link: RTCPeerConnection['connectionState'] | 'none'
   hasAudio: boolean
   hasVideo: boolean
+  /** Track cam đang thực sự có dữ liệu (không phải đen / đứng). */
+  camLive: boolean
+  /** Track màn hình đang thực sự có dữ liệu. */
+  screenLive: boolean
 }
 
 export type StarScore = {
@@ -95,6 +101,21 @@ type UseRoomOptions = {
   roomId: string
   displayName: string
   asHost?: boolean
+}
+
+/**
+ * Media của 1 peer. Hai MediaStream được tạo một lần và giữ nguyên suốt phiên
+ * để thẻ <video> không phải bind lại (bind lại là nguyên nhân đứng hình / đen).
+ */
+type RemoteMedia = {
+  cam: MediaStream
+  screen: MediaStream
+  tracks: Record<TrackRole, MediaStreamTrack | null>
+}
+
+/** Track có dữ liệu thật: chưa kết thúc và không bị mute bởi phía gửi. */
+function trackLive(track: MediaStreamTrack | null | undefined) {
+  return Boolean(track && track.readyState === 'live' && !track.muted)
 }
 
 export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions) {
@@ -133,17 +154,16 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const [roomName, setRoomName] = useState<string | null>(null)
 
   const meshRef = useRef<PeerMesh | null>(null)
-  const remoteMediaRef = useRef<
-    Map<string, { camera: MediaStream; screen: MediaStream; streamByTrack: Map<string, string> }>
-  >(new Map())
+  const remoteMediaRef = useRef<Map<string, RemoteMedia>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null)
   const screenTrackRef = useRef<MediaStreamTrack | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenSharingRef = useRef(false)
+  const camOnRef = useRef(true)
+  camOnRef.current = camOn
   const stopScreenShareRef = useRef<() => Promise<void>>(async () => {})
   const applyMicRef = useRef<(on: boolean) => Promise<void>>(async () => {})
-  const renegotiateAllRef = useRef<() => void>(() => {})
   const sessionAliveRef = useRef(false)
   screenSharingRef.current = screenSharing
   const participantsRef = useRef<Record<string, Participant>>({})
@@ -157,12 +177,16 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     const screen = new MediaStream([track])
     screenStreamRef.current = screen
     setScreenStream(screen)
-    meshRef.current?.publishScreen(track, localStreamRef.current)
+    // Slot màn hình đã được negotiate từ đầu → chỉ cần replaceTrack.
+    meshRef.current?.syncLocalTracks()
+    meshRef.current?.setQuality(meshRef.current.peerIds().length, true)
   }, [])
 
   const unpublishScreenTrack = useCallback(() => {
     const track = screenTrackRef.current
-    meshRef.current?.unpublishScreen(localStreamRef.current)
+    screenTrackRef.current = null
+    meshRef.current?.syncLocalTracks()
+    meshRef.current?.setQuality(meshRef.current.peerIds().length, false)
     track?.stop()
     const screen = screenStreamRef.current
     if (screen && track) {
@@ -172,7 +196,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         /* ignore */
       }
     }
-    screenTrackRef.current = null
+    screenStreamRef.current = null
     setScreenStream(null)
   }, [])
 
@@ -200,105 +224,117 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       })
     }
 
+    const ensureRemoteMedia = (peerId: string) => {
+      let media = remoteMediaRef.current.get(peerId)
+      if (!media) {
+        media = {
+          cam: new MediaStream(),
+          screen: new MediaStream(),
+          tracks: { mic: null, camera: null, screen: null },
+        }
+        remoteMediaRef.current.set(peerId, media)
+      }
+      return media
+    }
+
     const upsertRemote = (peerId: string) => {
-      const media = remoteMediaRef.current.get(peerId)
+      const media = ensureRemoteMedia(peerId)
       const meta = participantsRef.current[peerId]
-      const screenLive = Boolean(media?.screen.getVideoTracks().some((t) => t.readyState !== 'ended'))
-      const audioTrack = media?.camera.getAudioTracks().find((t) => t.readyState !== 'ended')
-      const videoTrack = media?.camera.getVideoTracks().find((t) => t.readyState !== 'ended')
-      const screenTrack = media?.screen.getVideoTracks().find((t) => t.readyState !== 'ended')
-      const hasMedia = Boolean(audioTrack || videoTrack || screenTrack)
+      const micLive = trackLive(media.tracks.mic)
+      const camLive = trackLive(media.tracks.camera)
+      const screenLive = trackLive(media.tracks.screen)
       const pc = meshRef.current?.getConnection(peerId)
       const peer: RemotePeer = {
         userId: peerId,
         name: meta?.name ?? peerId.slice(0, 6),
-        mic: audioTrack ? meta?.mic !== false && audioTrack.enabled : (meta?.mic ?? false),
-        camera: videoTrack ? meta?.camera !== false && videoTrack.enabled : (meta?.camera ?? false),
-        sharing: meta?.sharing ?? screenLive,
-        stream: hasMedia ? media!.camera : null,
-        screenStream: screenLive ? media!.screen : null,
+        mic: micLive && meta?.mic !== false,
+        camera: camLive && meta?.camera !== false,
+        sharing: screenLive || meta?.sharing === true,
+        stream: media.cam,
+        screenStream: media.screen,
         link: pc?.connectionState ?? 'none',
-        hasAudio: Boolean(audioTrack),
-        hasVideo: Boolean(videoTrack || screenTrack),
+        hasAudio: micLive,
+        hasVideo: camLive || screenLive,
+        camLive,
+        screenLive,
       }
       setRemotes((prev) => {
-        if (!prev.some((p) => p.userId === peerId)) return [...prev, peer]
-        return prev.map((p) => (p.userId === peerId ? { ...p, ...peer } : p))
+        const idx = prev.findIndex((p) => p.userId === peerId)
+        if (idx === -1) return [...prev, peer]
+        const old = prev[idx]!
+        const unchanged =
+          old.name === peer.name &&
+          old.mic === peer.mic &&
+          old.camera === peer.camera &&
+          old.sharing === peer.sharing &&
+          old.link === peer.link &&
+          old.hasAudio === peer.hasAudio &&
+          old.hasVideo === peer.hasVideo &&
+          old.camLive === peer.camLive &&
+          old.screenLive === peer.screenLive &&
+          old.stream === peer.stream &&
+          old.screenStream === peer.screenStream
+        if (unchanged) return prev
+        const next = [...prev]
+        next[idx] = { ...old, ...peer }
+        return next
       })
     }
 
-    const attachIncomingTrack = (peerId: string, ev: RTCTrackEvent) => {
-      const track = ev.track
-      const inbound = ev.streams[0]
-      let media = remoteMediaRef.current.get(peerId)
-      if (!media) {
-        media = { camera: new MediaStream(), screen: new MediaStream(), streamByTrack: new Map() }
-        remoteMediaRef.current.set(peerId, media)
-      }
-      if (inbound) {
-        media.streamByTrack.set(track.id, inbound.id)
-      } else {
-        const pc = meshRef.current?.getConnection(peerId)
-        const videoReceivers = pc?.getTransceivers().filter((t) => {
-          const kind = t.receiver.track?.kind ?? t.sender.track?.kind
-          return kind === 'video'
-        }) ?? []
-        const videoIdx = videoReceivers.findIndex((t) => t.receiver.track?.id === track.id)
-        if (track.kind === 'video' && videoIdx > 0) {
-          media.streamByTrack.set(track.id, `screen:${peerId}`)
-        } else if (track.kind === 'video') {
-          media.streamByTrack.set(track.id, `cam:${peerId}`)
-        } else {
-          media.streamByTrack.set(track.id, `mic:${peerId}`)
-        }
-      }
+    // Trình duyệt đôi khi bỏ sót mute/unmute → soát lại theo trạng thái track thật.
+    const sweep = window.setInterval(() => {
+      if (!alive()) return
+      for (const peerId of remoteMediaRef.current.keys()) upsertRemote(peerId)
+    }, 3000)
+    cleanups.push(() => window.clearInterval(sweep))
 
-      const rebalance = () => {
-        const m = remoteMediaRef.current.get(peerId)
-        if (!m) return
-        const known = new Map<string, MediaStreamTrack>()
-        for (const t of [...m.camera.getTracks(), ...m.screen.getTracks(), track]) known.set(t.id, t)
-        const audio = [...known.values()].find((t) => t.kind === 'audio' && t.readyState !== 'ended')
-        const cameraSid = audio ? m.streamByTrack.get(audio.id) : undefined
-        for (const t of known.values()) {
-          if (t.readyState === 'ended') {
-            if (m.camera.getTracks().some((x) => x.id === t.id)) m.camera.removeTrack(t)
-            if (m.screen.getTracks().some((x) => x.id === t.id)) m.screen.removeTrack(t)
-            continue
-          }
-          const sid = m.streamByTrack.get(t.id)
-          const camHasVideo = m.camera.getVideoTracks().some((x) => x.id !== t.id && x.readyState !== 'ended')
-          const toScreen =
-            t.kind === 'video' &&
-            (sid?.startsWith('screen:') ||
-              Boolean(cameraSid && sid && sid !== cameraSid && !sid.startsWith('cam:') && !sid.startsWith('mic:')) ||
-              camHasVideo)
-          const dest = toScreen ? m.screen : m.camera
-          const other = dest === m.screen ? m.camera : m.screen
-          if (other.getTracks().some((x) => x.id === t.id)) other.removeTrack(t)
-          if (!dest.getTracks().some((x) => x.id === t.id)) dest.addTrack(t)
+    /**
+     * Track tới với role xác định từ layout m-line, không phải đoán.
+     * Track của mỗi slot ổn định suốt phiên: bật/tắt share chỉ đổi mute/unmute.
+     */
+    const attachIncomingTrack = (peerId: string, role: TrackRole, track: MediaStreamTrack) => {
+      const media = ensureRemoteMedia(peerId)
+      const target = role === 'screen' ? media.screen : media.cam
+      const previous = media.tracks[role]
+      if (previous && previous.id !== track.id) {
+        try {
+          target.removeTrack(previous)
+        } catch {
+          /* ignore */
         }
+      }
+      media.tracks[role] = track
+      if (!target.getTracks().some((t) => t.id === track.id)) target.addTrack(track)
+
+      const refresh = () => {
+        if (!alive()) return
+        if (remoteMediaRef.current.get(peerId)?.tracks[role] !== track) return
         upsertRemote(peerId)
       }
-      rebalance()
-      track.addEventListener('ended', rebalance)
-      track.addEventListener('unmute', () => upsertRemote(peerId))
+      track.addEventListener('unmute', refresh)
+      track.addEventListener('mute', refresh)
+      track.addEventListener('ended', refresh)
+      refresh()
     }
 
     const mesh = new PeerMesh(
       userId,
       createPeerConnection,
       {
-        onTrack: (peerId, ev) => attachIncomingTrack(peerId, ev),
+        onTrack: attachIncomingTrack,
         onLink: (peerId) => upsertRemote(peerId),
         onSignal: (to, payload) => {
           void sendSignal(to, payload)
         },
       },
-      () => ({ local: localStreamRef.current, screen: screenTrackRef.current }),
+      () => ({
+        mic: localStreamRef.current?.getAudioTracks()[0] ?? null,
+        // Tắt cam là ngừng gửi hẳn (không gửi frame đen) → nhường băng thông cho người khác.
+        camera: camOnRef.current ? cameraTrackRef.current : null,
+        screen: screenTrackRef.current,
+      }),
     )
     meshRef.current = mesh
-    renegotiateAllRef.current = () => mesh.renegotiateAll()
 
     const listenPeerSignals = (from: string) => {
       if (!from || from === userId || signalUnsubs.has(from)) return
@@ -321,9 +357,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           void remove(msgRef)
           return
         }
-        void mesh
-          .handleSignal(from, payload, localStreamRef.current, screenTrackRef.current)
-          .then(() => remove(msgRef))
+        void mesh.handleSignal(from, payload).then(() => remove(msgRef))
       }
 
       const unsub = onChildAdded(msgsRef, (snap) => {
@@ -347,22 +381,12 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
     const connectPeer = (peerId: string) => {
       listenPeerSignals(peerId)
-      const initiate = userId > peerId
-      mesh.connect(peerId, localStreamRef.current, screenTrackRef.current, initiate)
+      mesh.connect(peerId)
       upsertRemote(peerId)
-      const theyShare = participantsRef.current[peerId]?.sharing === true
-      if (theyShare || screenTrackRef.current) {
-        window.setTimeout(() => {
-          if (alive()) mesh.nudgeScreen(peerId)
-        }, 500)
-        window.setTimeout(() => {
-          if (alive()) mesh.nudgeScreen(peerId)
-        }, 2000)
-      }
     }
 
     const disconnectPeer = (peerId: string, full = false) => {
-      mesh.disconnect(peerId, full)
+      mesh.disconnect(peerId)
       if (full) {
         signalUnsubs.get(peerId)?.()
         signalUnsubs.delete(peerId)
@@ -415,6 +439,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         localStreamRef.current = media.stream
         setLocalStream(media.stream)
         cameraTrackRef.current = media.stream.getVideoTracks()[0] ?? null
+        camOnRef.current = media.camera
         setMicOn(media.mic)
         setCamOn(media.camera)
         setMediaWarning(media.warning)
@@ -437,34 +462,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           participantsRef.current = val
           setParticipants(val)
 
-          setRemotes((prev) =>
-            prev.map((r) => {
-              const meta = val[r.userId]
-              if (!meta) return r
-              const sharing = meta.sharing ?? false
-              const m = remoteMediaRef.current.get(r.userId)
-              const screenLive = Boolean(m?.screen.getVideoTracks().some((t) => t.readyState !== 'ended'))
-              return {
-                ...r,
-                name: meta.name,
-                mic: meta.mic,
-                camera: meta.camera,
-                sharing: sharing || screenLive,
-                screenStream: sharing || screenLive ? (r.screenStream ?? (screenLive ? m!.screen : null)) : null,
-              }
-            }),
-          )
-
-          for (const peerId of Object.keys(val)) {
-            if (peerId !== userId && val[peerId]?.sharing) {
-              upsertRemote(peerId)
-              const hasScreen = remoteMediaRef.current
-                .get(peerId)
-                ?.screen.getVideoTracks()
-                .some((t) => t.readyState !== 'ended')
-              if (!hasScreen) mesh.nudgeScreen(peerId)
-            }
-          }
+          for (const peerId of remoteMediaRef.current.keys()) upsertRemote(peerId)
 
           for (const peerId of mesh.peerIds()) {
             if (!val[peerId]) disconnectPeer(peerId, true)
@@ -476,6 +474,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
             if (peerId === userId) continue
             connectPeer(peerId)
           }
+
+          // Mesh: mỗi người upload 1 bản cho từng peer → siết bitrate theo số người.
+          const others = Object.keys(val).filter((id) => id !== userId).length
+          mesh.setQuality(others, screenSharingRef.current)
         })
         cleanups.push(() => {
           unsubParticipants()
@@ -825,7 +827,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     return () => {
       sessionAliveRef.current = false
       cancelled = true
-      renegotiateAllRef.current = () => {}
       for (const c of cleanups) c()
       meshRef.current?.disconnectAll()
       meshRef.current = null
@@ -926,16 +927,13 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const toggleCam = useCallback(async () => {
     const stream = localStreamRef.current
     if (!stream) return
-    const cam = cameraTrackRef.current
     const next = !camOn
-    if (cam && cam.readyState === 'live') {
-      cam.enabled = next
-    } else {
-      stream.getVideoTracks().forEach((t) => {
-        if (t !== screenTrackRef.current) t.enabled = next
-      })
-    }
+    stream.getVideoTracks().forEach((t) => {
+      if (t !== screenTrackRef.current) t.enabled = next
+    })
+    camOnRef.current = next
     setCamOn(next)
+    meshRef.current?.syncLocalTracks()
     await update(ref(getDb(), `rooms/${roomId}/participants/${userId}`), { camera: next })
   }, [camOn, roomId, userId])
 
