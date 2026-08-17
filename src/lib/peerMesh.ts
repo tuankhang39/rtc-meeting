@@ -73,7 +73,9 @@ export class PeerMesh {
       const dead = entry.pc.connectionState === 'closed' || entry.pc.connectionState === 'failed'
       if (!dead) {
         const hadScreen = Boolean(entry.screenSender?.track)
-        this.syncTracks(entry, localStream, screenTrack)
+        this.syncCamMic(entry, localStream)
+        if (screenTrack) this.attachScreen(entry, screenTrack)
+        else if (this.isOfferer(peerId)) this.ensureRecvScreenSlot(entry)
         if (!hadScreen && entry.screenSender?.track) this.scheduleNegotiation(peerId, true)
         return entry.pc
       }
@@ -104,6 +106,10 @@ export class PeerMesh {
       if (this.peers.get(peerId)?.pc !== pc) return
       const negotiated = Boolean(pc.remoteDescription)
       if (!negotiated && !this.isOfferer(peerId)) return
+      if (pc.signalingState !== 'stable') {
+        entry.negotiateForce = true
+        return
+      }
       this.scheduleNegotiation(peerId, negotiated)
     }
     pc.onconnectionstatechange = () => {
@@ -118,7 +124,9 @@ export class PeerMesh {
       }
     }
 
-    this.syncTracks(entry, localStream, screenTrack)
+    this.syncCamMic(entry, localStream)
+    if (screenTrack) this.attachScreen(entry, screenTrack)
+    else if (this.isOfferer(peerId)) this.ensureRecvScreenSlot(entry)
 
     if (initiate) void this.maybeOffer(peerId, true)
     this.scheduleRetry(peerId)
@@ -130,10 +138,81 @@ export class PeerMesh {
   private getOrCreate(peerId: string, localStream: MediaStream | null, screenTrack?: MediaStreamTrack | null) {
     const existing = this.peers.get(peerId)
     if (existing && existing.pc.connectionState !== 'closed' && existing.pc.connectionState !== 'failed') {
-      this.syncTracks(existing, localStream, screenTrack)
+      this.syncCamMic(existing, localStream)
       return existing.pc
     }
     return this.connect(peerId, localStream, screenTrack, false)
+  }
+
+  private syncCamMic(entry: PeerEntry, localStream: MediaStream | null) {
+    if (!localStream) return
+    for (const track of localStream.getTracks()) {
+      if (track.readyState === 'ended') continue
+      if (track.kind === 'audio') this.upsertSender(entry, 'audioSender', track, localStream)
+      else if (track.kind === 'video') this.upsertSender(entry, 'cameraSender', track, localStream)
+    }
+  }
+
+  /** Offerer luôn chừa 1 m-line video nhận share — người vào sau mới nhận được màn hình. */
+  private ensureRecvScreenSlot(entry: PeerEntry) {
+    if (entry.screenSender) return
+    const tr = entry.pc.addTransceiver('video', { direction: 'recvonly' })
+    entry.screenSender = tr.sender
+  }
+
+  /**
+   * Gắn track share. Sau setRemoteDescription thì ưu tiên reuse transceiver
+   * (m-line recvonly trong offer) — không addTrack tạo m-line mới trong answer.
+   */
+  private attachScreen(entry: PeerEntry, screenTrack: MediaStreamTrack | null | undefined): boolean {
+    const live = screenTrack && screenTrack.readyState !== 'ended' ? screenTrack : null
+    if (entry.screenSender) {
+      if (entry.screenSender.track?.id !== (live?.id ?? undefined)) {
+        void entry.screenSender.replaceTrack(live)
+      }
+      const tr = entry.pc.getTransceivers().find((t) => t.sender === entry.screenSender)
+      if (tr && live && tr.direction === 'recvonly') tr.direction = 'sendrecv'
+      return false
+    }
+    if (!live) return false
+
+    const spare = entry.pc.getTransceivers().find((t) => {
+      if (t.sender === entry.cameraSender || t.sender === entry.audioSender) return false
+      if (t.sender.track) return false
+      if (t.receiver.track?.kind === 'audio') return false
+      return t.receiver.track?.kind === 'video' || t.direction === 'recvonly'
+    })
+    if (spare) {
+      void spare.sender.replaceTrack(live)
+      spare.direction = 'sendrecv'
+      entry.screenSender = spare.sender
+      return false
+    }
+
+    entry.screenSender = entry.pc.addTrack(live, new MediaStream([live]))
+    return true
+  }
+
+  private screenNeedsOffer(entry: PeerEntry) {
+    if (!entry.screenSender?.track) return false
+    const tr = entry.pc.getTransceivers().find((t) => t.sender === entry.screenSender)
+    return Boolean(tr && !tr.mid)
+  }
+
+  /** Người vào sau / đang share: ép offer lại để có track màn hình. */
+  nudgeScreen(peerId: string) {
+    const entry = this.peers.get(peerId)
+    if (!entry) return
+    const { local, screen } = this.getMedia()
+    this.syncCamMic(entry, local)
+    if (screen) {
+      const addedNew = this.attachScreen(entry, screen)
+      this.scheduleNegotiation(peerId, true)
+      if (addedNew) this.scheduleNegotiation(peerId, true)
+    } else if (this.isOfferer(peerId)) {
+      this.ensureRecvScreenSlot(entry)
+      this.scheduleNegotiation(peerId, true)
+    }
   }
 
   private upsertSender(
@@ -157,26 +236,6 @@ export class PeerMesh {
     entry[slot] = entry.pc.addTrack(track, stream)
   }
 
-  private syncTracks(entry: PeerEntry, localStream: MediaStream | null, screenTrack?: MediaStreamTrack | null) {
-    if (localStream) {
-      for (const track of localStream.getTracks()) {
-        if (track.readyState === 'ended') continue
-        if (track.kind === 'audio') this.upsertSender(entry, 'audioSender', track, localStream)
-        else if (track.kind === 'video') this.upsertSender(entry, 'cameraSender', track, localStream)
-      }
-    }
-
-    if (screenTrack && screenTrack.readyState !== 'ended') {
-      if (entry.screenSender) {
-        if (entry.screenSender.track?.id !== screenTrack.id) void entry.screenSender.replaceTrack(screenTrack)
-      } else {
-        entry.screenSender = entry.pc.addTrack(screenTrack, new MediaStream([screenTrack]))
-      }
-    } else if (entry.screenSender?.track) {
-      void entry.screenSender.replaceTrack(null)
-    }
-  }
-
   async handleSignal(
     from: string,
     payload: SignalPayload,
@@ -196,7 +255,7 @@ export class PeerMesh {
     screenTrack?: MediaStreamTrack | null,
   ) {
     const entry = this.peers.get(from)
-    const pc = entry?.pc ?? this.getOrCreate(from, localStream, screenTrack)
+    const pc = entry?.pc ?? this.getOrCreate(from, localStream, null)
     const e = this.peers.get(from)!
     const polite = this.isPolite(from)
 
@@ -217,13 +276,20 @@ export class PeerMesh {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
         e.ignoreOffer = false
         await this.flushIce(from, pc)
+        this.syncCamMic(e, localStream)
+        const addedScreenMLine = this.attachScreen(e, screenTrack)
         await pc.setLocalDescription(await pc.createAnswer())
         this.events.onSignal(from, { type: 'answer', sdp: this.desc(pc.localDescription) })
+        if (addedScreenMLine || this.screenNeedsOffer(e) || e.negotiateForce) {
+          this.scheduleNegotiation(from, true)
+        }
       } else if (payload.type === 'answer') {
         if (pc.signalingState !== 'have-local-offer') return
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
         e.ignoreOffer = false
         await this.flushIce(from, pc)
+        this.attachScreen(e, screenTrack)
+        if (this.screenNeedsOffer(e) || e.negotiateForce) this.scheduleNegotiation(from, true)
       } else if (payload.type === 'candidate') {
         if (!payload.candidate) return
         if (!pc.remoteDescription) {
@@ -292,21 +358,17 @@ export class PeerMesh {
 
   publishScreen(screenTrack: MediaStreamTrack, localStream: MediaStream | null) {
     for (const [peerId, entry] of this.peers) {
-      const needNewTransceiver = !entry.screenSender
-      if (entry.screenSender) {
-        void entry.screenSender.replaceTrack(screenTrack)
-      } else {
-        entry.screenSender = entry.pc.addTrack(screenTrack, new MediaStream([screenTrack]))
-      }
-      this.syncTracks(entry, localStream, screenTrack)
-      if (needNewTransceiver) this.scheduleNegotiation(peerId, true)
+      this.syncCamMic(entry, localStream)
+      const addedNew = this.attachScreen(entry, screenTrack)
+      this.scheduleNegotiation(peerId, true)
+      if (addedNew) this.scheduleNegotiation(peerId, true)
     }
   }
 
   unpublishScreen(localStream: MediaStream | null) {
     for (const entry of this.peers.values()) {
       if (entry.screenSender?.track) void entry.screenSender.replaceTrack(null)
-      this.syncTracks(entry, localStream, null)
+      this.syncCamMic(entry, localStream)
     }
   }
 

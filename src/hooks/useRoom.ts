@@ -239,8 +239,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         media.streamByTrack.set(track.id, inbound.id)
       } else {
         const pc = meshRef.current?.getConnection(peerId)
-        const videoReceivers = pc?.getTransceivers()
-          .filter((t) => t.receiver.track?.kind === 'video' && t.receiver.track.readyState !== 'ended') ?? []
+        const videoReceivers = pc?.getTransceivers().filter((t) => {
+          const kind = t.receiver.track?.kind ?? t.sender.track?.kind
+          return kind === 'video'
+        }) ?? []
         const videoIdx = videoReceivers.findIndex((t) => t.receiver.track?.id === track.id)
         if (track.kind === 'video' && videoIdx > 0) {
           media.streamByTrack.set(track.id, `screen:${peerId}`)
@@ -348,6 +350,15 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       const initiate = userId > peerId
       mesh.connect(peerId, localStreamRef.current, screenTrackRef.current, initiate)
       upsertRemote(peerId)
+      const theyShare = participantsRef.current[peerId]?.sharing === true
+      if (theyShare || screenTrackRef.current) {
+        window.setTimeout(() => {
+          if (alive()) mesh.nudgeScreen(peerId)
+        }, 500)
+        window.setTimeout(() => {
+          if (alive()) mesh.nudgeScreen(peerId)
+        }, 2000)
+      }
     }
 
     const disconnectPeer = (peerId: string, full = false) => {
@@ -445,7 +456,14 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           )
 
           for (const peerId of Object.keys(val)) {
-            if (peerId !== userId && val[peerId]?.sharing) upsertRemote(peerId)
+            if (peerId !== userId && val[peerId]?.sharing) {
+              upsertRemote(peerId)
+              const hasScreen = remoteMediaRef.current
+                .get(peerId)
+                ?.screen.getVideoTracks()
+                .some((t) => t.readyState !== 'ended')
+              if (!hasScreen) mesh.nudgeScreen(peerId)
+            }
           }
 
           for (const peerId of mesh.peerIds()) {
