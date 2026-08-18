@@ -26,6 +26,8 @@ type Props = {
   onStar?: () => void
   starBurst?: boolean
   playfulEffects?: PlayfulEffect[]
+  /** Hiện thay avatar khi chưa có hình (dùng cho khung màn hình đang share). */
+  placeholder?: string
 }
 
 export function VideoTile({
@@ -48,13 +50,14 @@ export function VideoTile({
   onStar,
   starBurst = false,
   playfulEffects = [],
+  placeholder,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
   const speakFrom = audioStream ?? stream
   const speaking = useSpeaking(speakFrom, micOn)
 
-  useVideoStream(videoRef, stream)
+  const painted = useVideoStream(videoRef, stream)
 
   useEffect(() => {
     const el = audioRef.current
@@ -73,7 +76,7 @@ export function VideoTile({
     }
   }, [audioStream, muted, stream])
 
-  const showVideo = camOn
+  const showVideo = camOn && painted
 
   return (
     <div
@@ -103,7 +106,15 @@ export function VideoTile({
           style={{ opacity: showVideo ? 1 : 0 }}
         />
         {!muted && <audio ref={audioRef} autoPlay />}
-        {!showVideo && <div className="tile-avatar">{label.slice(0, 1).toUpperCase()}</div>}
+        {!showVideo &&
+          (placeholder ? (
+            <div className="stage-wait">
+              <p>{placeholder}</p>
+              <span className="muted">Chờ hình từ người share</span>
+            </div>
+          ) : (
+            <div className="tile-avatar">{label.slice(0, 1).toUpperCase()}</div>
+          ))}
       </div>
 
       <PlayfulOverlay effects={playfulEffects} />

@@ -113,9 +113,13 @@ type RemoteMedia = {
   tracks: Record<TrackRole, MediaStreamTrack | null>
 }
 
-/** Track có dữ liệu thật: chưa kết thúc và không bị mute bởi phía gửi. */
-function trackLive(track: MediaStreamTrack | null | undefined) {
-  return Boolean(track && track.readyState === 'live' && !track.muted)
+/**
+ * Track còn dùng được. Cố tình KHÔNG xét `track.muted`: Chrome báo muted cho
+ * track nhận rất trễ và hay bỏ sót `unmute`, dựa vào đó là ẩn mất video đang tốt.
+ * Việc "đã có hình thật hay chưa" do thẻ <video> tự đo (xem useVideoStream).
+ */
+function trackUsable(track: MediaStreamTrack | null | undefined) {
+  return Boolean(track && track.readyState !== 'ended')
 }
 
 export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions) {
@@ -240,21 +244,23 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     const upsertRemote = (peerId: string) => {
       const media = ensureRemoteMedia(peerId)
       const meta = participantsRef.current[peerId]
-      const micLive = trackLive(media.tracks.mic)
-      const camLive = trackLive(media.tracks.camera)
-      const screenLive = trackLive(media.tracks.screen)
+      const micLive = trackUsable(media.tracks.mic)
+      const camLive = trackUsable(media.tracks.camera)
+      const screenLive = trackUsable(media.tracks.screen)
       const pc = meshRef.current?.getConnection(peerId)
       const peer: RemotePeer = {
         userId: peerId,
         name: meta?.name ?? peerId.slice(0, 6),
         mic: micLive && meta?.mic !== false,
         camera: camLive && meta?.camera !== false,
-        sharing: screenLive || meta?.sharing === true,
+        // Slot màn hình luôn tồn tại nên KHÔNG được suy ra "đang share" từ track.
+        // Ai đang share chỉ có trạng thái phòng mới nói được.
+        sharing: meta?.sharing === true,
         stream: media.cam,
         screenStream: media.screen,
         link: pc?.connectionState ?? 'none',
         hasAudio: micLive,
-        hasVideo: camLive || screenLive,
+        hasVideo: camLive,
         camLive,
         screenLive,
       }
@@ -281,7 +287,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       })
     }
 
-    // Trình duyệt đôi khi bỏ sót mute/unmute → soát lại theo trạng thái track thật.
+    // Soát lại định kỳ để trạng thái không bị lệch nếu lỡ mất một event nào.
     const sweep = window.setInterval(() => {
       if (!alive()) return
       for (const peerId of remoteMediaRef.current.keys()) upsertRemote(peerId)
@@ -336,6 +342,17 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     )
     meshRef.current = mesh
 
+    // Gõ rtcDebug() trong console để xem từng kết nối đang gửi/nhận gì.
+    const debugHost = window as unknown as { rtcDebug?: () => Promise<unknown> }
+    debugHost.rtcDebug = async () => {
+      const snapshot = await mesh.debug()
+      console.table(snapshot)
+      return snapshot
+    }
+    cleanups.push(() => {
+      delete debugHost.rtcDebug
+    })
+
     const listenPeerSignals = (from: string) => {
       if (!from || from === userId || signalUnsubs.has(from)) return
       const msgsRef = ref(db, `rooms/${roomId}/signals/${userId}/${from}`)
@@ -380,9 +397,14 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     }
 
     const connectPeer = (peerId: string) => {
-      listenPeerSignals(peerId)
-      mesh.connect(peerId)
-      upsertRemote(peerId)
+      // Một peer lỗi không được phép chặn việc kết nối tới những người còn lại.
+      try {
+        listenPeerSignals(peerId)
+        mesh.connect(peerId)
+        upsertRemote(peerId)
+      } catch (err) {
+        console.error('connectPeer', peerId, err)
+      }
     }
 
     const disconnectPeer = (peerId: string, full = false) => {

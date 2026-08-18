@@ -1,39 +1,40 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 
 const TRACK_EVENTS = ['unmute', 'mute', 'ended'] as const
 const TICK_MS = 700
-/** Số nhịp liên tiếp không có frame mới trước khi gắn lại srcObject (~4s). */
-const STALL_TICKS = 6
+/** Số nhịp chưa hề có frame nào trước khi thử gắn lại srcObject (~3.5s). */
+const BLANK_TICKS = 5
 
 /**
- * Gắn MediaStream vào <video> và giữ cho nó luôn chạy.
+ * Gắn MediaStream vào <video>, giữ cho nó luôn chạy, và cho biết đã có hình thật chưa.
  *
- * Ba tình huống hay làm video đứng/đen mà React không hề biết:
- *  • track WebRTC được thêm vào stream bằng code → không có event `addtrack`
- *  • trình duyệt để video ở trạng thái paused sau khi tab bị ẩn hoặc
- *    sau khi cửa sổ Picture-in-Picture di chuyển / đổi kích thước
- *  • track chuyển muted → unmuted khi bên gửi bật cam hoặc bắt đầu share
+ * `playing` dựa vào `videoWidth` — chỉ khác 0 khi trình duyệt đã decode được
+ * ít nhất một frame. Đây là nguồn tin duy nhất đáng tin: `track.muted` của
+ * WebRTC báo trễ và hay bỏ sót, dựa vào nó là ẩn mất video đang tốt.
  *
- * Nhịp kiểm tra ngắn xử lý cả ba: phát lại khi bị pause, và gắn lại
- * srcObject khi frame không nhích trong vài giây.
+ * Watchdog chỉ gắn lại srcObject khi video CHƯA từng có frame. Video đã có hình
+ * rồi mà frame ngừng nhích thì để yên — màn hình share tĩnh (slide) là như vậy,
+ * gắn lại chỉ làm nó nháy.
  */
 export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: MediaStream | null) {
+  const [playing, setPlaying] = useState(false)
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
 
-    const hasLiveVideo = () =>
-      Boolean(stream?.getVideoTracks().some((t) => t.readyState === 'live' && !t.muted))
+    const hasVideoTrack = () => Boolean(stream?.getVideoTracks().some((t) => t.readyState !== 'ended'))
 
     const kick = () => {
       const node = ref.current
       if (!node) return
       if (node.srcObject !== stream) node.srcObject = stream
-      if (hasLiveVideo() && node.paused) void node.play().catch(() => {})
+      if (hasVideoTrack() && node.paused) void node.play().catch(() => {})
     }
 
     const watched = new Set<MediaStreamTrack>()
     const watchNewTracks = () => {
+      // Track WebRTC được thêm bằng code nên không có event `addtrack`.
       if (!stream) return
       for (const track of stream.getTracks()) {
         if (watched.has(track)) continue
@@ -42,30 +43,31 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
       }
     }
 
-    let lastTime = -1
-    let stalls = 0
+    let blank = 0
     const tick = () => {
       watchNewTracks()
       const node = ref.current
       if (!node) return
       if (node.srcObject !== stream) node.srcObject = stream
-      if (!hasLiveVideo()) {
-        lastTime = -1
-        stalls = 0
+
+      const painted = node.videoWidth > 0
+      setPlaying(painted && hasVideoTrack())
+
+      if (!hasVideoTrack()) {
+        blank = 0
         return
       }
       if (node.paused) {
         void node.play().catch(() => {})
         return
       }
-      if (node.currentTime !== lastTime) {
-        lastTime = node.currentTime
-        stalls = 0
+      if (painted) {
+        blank = 0
         return
       }
-      stalls += 1
-      if (stalls < STALL_TICKS) return
-      stalls = 0
+      blank += 1
+      if (blank < BLANK_TICKS) return
+      blank = 0
       node.srcObject = null
       node.srcObject = stream
       void node.play().catch(() => {})
@@ -81,6 +83,7 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
 
     el.addEventListener('loadedmetadata', kick)
     el.addEventListener('canplay', kick)
+    el.addEventListener('resize', tick)
 
     // Với Picture-in-Picture, `document` toàn cục không phải document chứa video.
     const doc = el.ownerDocument
@@ -101,9 +104,13 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
       stream?.removeEventListener('removetrack', kick)
       el.removeEventListener('loadedmetadata', kick)
       el.removeEventListener('canplay', kick)
+      el.removeEventListener('resize', tick)
       doc.removeEventListener('visibilitychange', kick)
       view?.removeEventListener('resize', kick)
       view?.removeEventListener('focus', kick)
+      setPlaying(false)
     }
   }, [ref, stream])
+
+  return playing
 }

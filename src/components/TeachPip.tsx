@@ -51,10 +51,9 @@ function StripTile({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const speaking = useSpeaking(person.stream, person.micOn)
-  const showVideo = person.camOn && Boolean(person.stream)
+  const painted = useVideoStream(videoRef, person.stream)
+  const showVideo = person.camOn && painted
   const stars = person.stars ?? 0
-
-  useVideoStream(videoRef, person.stream)
 
   return (
     <div className={`teach-strip-tile${speaking ? ' is-speaking' : ''}${showVideo ? '' : ' cam-off'}`}>

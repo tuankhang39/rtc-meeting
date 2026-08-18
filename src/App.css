@@ -943,13 +943,19 @@
 }
 
 .stage-wait {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 240px;
   text-align: center;
+  background: linear-gradient(165deg, #f0e4ea, #e8d8e0);
+}
+
+[data-theme='dark'] .stage-wait {
+  background: linear-gradient(165deg, #2a3442, #1e2733);
 }
 
 .tile video {
