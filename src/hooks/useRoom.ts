@@ -25,6 +25,7 @@ import { playQuickCommentSound, unlockQuickAudio } from '../lib/quickAudio'
 import type { DrawStroke } from '../lib/draw'
 import type { ScreenSticker, StickerPackId } from '../lib/stickers'
 import { MAX_PARTICIPANTS, createPeerConnection, randomId } from '../lib/webrtc'
+import { resolveIceServers } from '../lib/iceServers'
 import { PeerMesh, type SignalPayload, type TrackRole } from '../lib/peerMesh'
 import { markRoomEmptyIfNeeded, markRoomOccupied, sweepEmptyRooms } from '../lib/rooms'
 
@@ -323,35 +324,45 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       refresh()
     }
 
-    const mesh = new PeerMesh(
-      userId,
-      createPeerConnection,
-      {
-        onTrack: attachIncomingTrack,
-        onLink: (peerId) => upsertRemote(peerId),
-        onSignal: (to, payload) => {
-          void sendSignal(to, payload)
-        },
-      },
-      () => ({
-        mic: localStreamRef.current?.getAudioTracks()[0] ?? null,
-        // Tắt cam là ngừng gửi hẳn (không gửi frame đen) → nhường băng thông cho người khác.
-        camera: camOnRef.current ? cameraTrackRef.current : null,
-        screen: screenTrackRef.current,
-      }),
-    )
-    meshRef.current = mesh
+    void (async () => {
+      try {
+        const iceServers = await resolveIceServers()
+        if (!alive()) return
 
-    // Gõ rtcDebug() trong console để xem từng kết nối đang gửi/nhận gì.
-    const debugHost = window as unknown as { rtcDebug?: () => Promise<unknown> }
-    debugHost.rtcDebug = async () => {
-      const snapshot = await mesh.debug()
-      console.table(snapshot)
-      return snapshot
-    }
-    cleanups.push(() => {
-      delete debugHost.rtcDebug
-    })
+        meshRef.current = new PeerMesh(
+          userId,
+          () => createPeerConnection(iceServers),
+          {
+            onTrack: attachIncomingTrack,
+            onLink: (peerId) => upsertRemote(peerId),
+            onSignal: (to, payload) => {
+              void sendSignal(to, payload)
+            },
+          },
+          () => ({
+            mic: localStreamRef.current?.getAudioTracks()[0] ?? null,
+            camera: camOnRef.current ? cameraTrackRef.current : null,
+            screen: screenTrackRef.current,
+          }),
+        )
+
+        const debugHost = window as unknown as { rtcDebug?: () => Promise<unknown> }
+        debugHost.rtcDebug = async () => {
+          const snapshot = await meshRef.current!.debug()
+          console.table(snapshot)
+          return snapshot
+        }
+        cleanups.push(() => {
+          delete debugHost.rtcDebug
+        })
+
+        await boot()
+      } catch (e) {
+        console.error(e)
+        setError(explainMediaError(e))
+        setStatus('error')
+      }
+    })()
 
     const listenPeerSignals = (from: string) => {
       if (!from || from === userId || signalUnsubs.has(from)) return
@@ -375,7 +386,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           return
         }
         // Chỉ xóa khi xử lý OK — nếu fail thì giữ lại để lần sau / peer kia retry.
-        void mesh.handleSignal(from, payload).then((ok) => {
+        void meshRef.current?.handleSignal(from, payload).then((ok) => {
           if (ok) void remove(msgRef)
         })
       }
@@ -400,10 +411,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     }
 
     const connectPeer = (peerId: string) => {
-      // Một peer lỗi không được phép chặn việc kết nối tới những người còn lại.
+      if (!meshRef.current) return
       try {
         listenPeerSignals(peerId)
-        mesh.connect(peerId)
+        meshRef.current.connect(peerId)
         upsertRemote(peerId)
       } catch (err) {
         console.error('connectPeer', peerId, err)
@@ -411,7 +422,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     }
 
     const disconnectPeer = (peerId: string, full = false) => {
-      mesh.disconnect(peerId)
+      meshRef.current?.disconnect(peerId)
       if (full) {
         signalUnsubs.get(peerId)?.()
         signalUnsubs.delete(peerId)
@@ -489,7 +500,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
           for (const peerId of remoteMediaRef.current.keys()) upsertRemote(peerId)
 
-          for (const peerId of mesh.peerIds()) {
+          for (const peerId of meshRef.current?.peerIds() ?? []) {
             if (!val[peerId]) disconnectPeer(peerId, true)
           }
 
@@ -502,7 +513,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
 
           // Mesh: mỗi người upload 1 bản cho từng peer → siết bitrate theo số người.
           const others = Object.keys(val).filter((id) => id !== userId).length
-          mesh.setQuality(others, screenSharingRef.current)
+          meshRef.current?.setQuality(others, screenSharingRef.current)
         })
         cleanups.push(() => {
           unsubParticipants()
@@ -587,7 +598,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           if (ev && 'persisted' in ev && (ev as PageTransitionEvent).persisted) return
           sessionAliveRef.current = false
           cancelled = true
-          mesh.disconnectAll()
+          meshRef.current?.disconnectAll()
           localStreamRef.current?.getTracks().forEach((t) => t.stop())
           screenTrackRef.current?.stop()
           void remove(meRef)
@@ -846,8 +857,6 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         setStatus('error')
       }
     }
-
-    void boot()
 
     return () => {
       sessionAliveRef.current = false

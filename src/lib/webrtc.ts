@@ -1,9 +1,10 @@
 /**
- * FREE-ONLY ICE config.
- * Nhiều STUN free để tăng tỷ lệ P2P trên WiFi nhà khác mạng.
- * Không TURN → một số NAT đối xứng vẫn fail (VPN/công ty).
+ * ICE: STUN (miễn phí) + TURN relay (tùy chọn qua /api/turn hoặc VITE_TURN_*).
+ * Chỉ STUN: hai bên khác IPv4/IPv6 hoặc NAT chặt thường không P2P trực tiếp được.
  */
-export const ICE_SERVERS: RTCIceServer[] = [
+export type IceServerList = RTCIceServer[]
+
+export const STUN_SERVERS: IceServerList = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
@@ -12,17 +13,14 @@ export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ]
 
+/** @deprecated dùng STUN_SERVERS */
+export const ICE_SERVERS = STUN_SERVERS
+
 export const MAX_PARTICIPANTS = 5
 
-/** Chế độ miễn phí: cấm mọi URL turn:/turns: */
-export function createPeerConnection() {
-  const servers = ICE_SERVERS.filter((s) => {
-    const urls = Array.isArray(s.urls) ? s.urls : [s.urls]
-    return urls.every((u) => typeof u === 'string' && u.startsWith('stun:'))
-  })
-
+export function createPeerConnection(iceServers: IceServerList = STUN_SERVERS) {
   return new RTCPeerConnection({
-    iceServers: servers,
+    iceServers,
     iceTransportPolicy: 'all',
     bundlePolicy: 'max-bundle',
     rtcpMuxPolicy: 'require',
