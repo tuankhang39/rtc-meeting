@@ -64,15 +64,30 @@ export function VideoTile({
     if (!el) return
     const src = muted ? null : (audioStream ?? stream)
     if (el.srcObject !== src) el.srcObject = src
-    if (!src?.getAudioTracks().some((t) => t.readyState === 'live')) return
+
+    const hasLiveAudio = () => Boolean(src?.getAudioTracks().some((t) => t.readyState === 'live'))
 
     const play = () => {
+      if (!hasLiveAudio()) return
       void el.play().catch(() => {})
     }
+
     play()
-    document.addEventListener('pointerdown', play, { once: true })
+    // Autoplay hay bị chặn → thử lại khi user tương tác / tab hiện lại.
+    document.addEventListener('pointerdown', play)
+    document.addEventListener('keydown', play)
+    document.addEventListener('visibilitychange', play)
+    const timer = window.setInterval(play, 2000)
+
+    const onAdd = () => play()
+    src?.addEventListener('addtrack', onAdd)
+
     return () => {
       document.removeEventListener('pointerdown', play)
+      document.removeEventListener('keydown', play)
+      document.removeEventListener('visibilitychange', play)
+      window.clearInterval(timer)
+      src?.removeEventListener('addtrack', onAdd)
     }
   }, [audioStream, muted, stream])
 

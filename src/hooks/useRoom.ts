@@ -374,7 +374,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           void remove(msgRef)
           return
         }
-        void mesh.handleSignal(from, payload).then(() => remove(msgRef))
+        // Chỉ xóa khi xử lý OK — nếu fail thì giữ lại để lần sau / peer kia retry.
+        void mesh.handleSignal(from, payload).then((ok) => {
+          if (ok) void remove(msgRef)
+        })
       }
 
       const unsub = onChildAdded(msgsRef, (snap) => {

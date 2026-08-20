@@ -1,15 +1,8 @@
 /**
- * WebRTC mesh — layout m-line CỐ ĐỊNH + Perfect Negotiation (W3C).
+ * WebRTC mesh — 3 slot cố định (mic / camera / screen) + Perfect Negotiation.
  *
- * Mỗi cặp peer có 1 RTCPeerConnection với đúng 3 slot, thứ tự không đổi:
- *   slot 0: audio  → mic
- *   slot 1: video  → camera
- *   slot 2: video  → screen share
- *
- * Cả 3 slot được negotiate MỘT LẦN lúc kết nối và luôn `sendrecv`.
- * Về sau bật/tắt cam, bật/tắt share chỉ là `replaceTrack`:
- * không tạo m-line mới, không renegotiate, không glare.
- * Nhờ vậy bên nhận luôn biết track nào là cam, track nào là màn hình.
+ * Chỉ OFFERER tạo 3 transceiver. Answerer map slot từ SDP rồi replaceTrack
+ * (await) trước khi trả answer — nếu không await dễ ra one-way audio/video.
  */
 
 export type TrackRole = 'mic' | 'camera' | 'screen'
@@ -29,7 +22,6 @@ export type PeerMeshEvents = {
   onSignal: (to: string, payload: SignalPayload) => void
 }
 
-/** Tham số nhánh mesh: mỗi người phải upload 1 bản cho từng peer. */
 type Quality = { peers: number; sharing: boolean }
 
 type TunableParams = RTCRtpSendParameters & {
@@ -48,31 +40,27 @@ type PeerEntry = {
   recoverTimer: number | null
   offeredAt: number
   restarts: number
+  /** Lần gần nhất đã nhận remoteDescription (offer/answer) */
+  negotiatedAt: number
 }
 
-/** Gửi lại offer cũ nếu chờ answer quá lâu (tin signaling có thể bị mất). */
-const OFFER_RESEND_MS = 6000
-const WATCHDOG_MS = 4000
+const OFFER_RESEND_MS = 3500
+const WATCHDOG_MS = 2500
+const ANSWERER_WAIT_MS = 8000
 
-/**
- * Không có SFU nên upload = (số peer) × (bitrate mỗi luồng).
- * Các mức dưới đây giữ tổng upload của người đang share dưới ~4 Mbps
- * ở phòng đông nhất, tức là vừa với đường truyền cáp quang gia đình.
- */
 function encodingFor(role: TrackRole, { peers, sharing }: Quality): RTCRtpEncodingParameters {
-  if (role === 'mic') return { maxBitrate: 40_000 }
+  if (role === 'mic') return { maxBitrate: 48_000 }
 
   if (role === 'screen') {
     const maxBitrate = peers >= 4 ? 800_000 : peers === 3 ? 1_000_000 : peers === 2 ? 1_500_000 : 2_000_000
     return { maxBitrate, maxFramerate: 15, scaleResolutionDownBy: 1 }
   }
 
-  // Camera nhường băng thông cho màn hình khi đang dạy.
-  if (sharing) return { maxBitrate: 120_000, maxFramerate: 15, scaleResolutionDownBy: 2 }
-  if (peers >= 4) return { maxBitrate: 200_000, maxFramerate: 20, scaleResolutionDownBy: 2 }
-  if (peers === 3) return { maxBitrate: 280_000, maxFramerate: 20, scaleResolutionDownBy: 1.5 }
-  if (peers === 2) return { maxBitrate: 400_000, maxFramerate: 24, scaleResolutionDownBy: 1 }
-  return { maxBitrate: 600_000, maxFramerate: 24, scaleResolutionDownBy: 1 }
+  if (sharing) return { maxBitrate: 150_000, maxFramerate: 15, scaleResolutionDownBy: 2 }
+  if (peers >= 4) return { maxBitrate: 220_000, maxFramerate: 20, scaleResolutionDownBy: 2 }
+  if (peers === 3) return { maxBitrate: 320_000, maxFramerate: 20, scaleResolutionDownBy: 1.5 }
+  if (peers === 2) return { maxBitrate: 450_000, maxFramerate: 24, scaleResolutionDownBy: 1 }
+  return { maxBitrate: 650_000, maxFramerate: 24, scaleResolutionDownBy: 1 }
 }
 
 function degradationFor(role: TrackRole): TunableParams['degradationPreference'] {
@@ -103,7 +91,6 @@ export class PeerMesh {
     this.getTracks = getTracks
   }
 
-  /** Impolite = bên gửi offer đầu tiên và tạo layout m-line. */
   isOfferer(peerId: string) {
     return this.userId > peerId
   }
@@ -121,8 +108,8 @@ export class PeerMesh {
     const existing = this.peers.get(peerId)
     if (existing) {
       if (existing.pc.connectionState !== 'closed') {
-        this.syncPeer(existing)
-        this.ensureOfferProgress(peerId, existing)
+        void this.syncPeer(existing)
+        this.ensureProgress(peerId, existing)
         return existing.pc
       }
       this.disconnect(peerId)
@@ -139,20 +126,32 @@ export class PeerMesh {
       recoverTimer: null,
       offeredAt: 0,
       restarts: 0,
+      negotiatedAt: 0,
     }
     this.peers.set(peerId, entry)
 
     pc.ontrack = (ev) => {
       const role = this.roleOf(entry, ev.transceiver)
-      if (role) this.events.onTrack(peerId, role, ev.track)
+      if (!role) return
+      const track = ev.track
+      this.events.onTrack(peerId, role, track)
+      // Một số Chrome chỉ fire ontrack 1 lần; unmute sau đó mới có media thật.
+      const bump = () => this.events.onTrack(peerId, role, track)
+      track.addEventListener('unmute', bump)
+      track.addEventListener('mute', bump)
     }
 
     pc.onicecandidate = (ev) => {
-      this.events.onSignal(peerId, { type: 'candidate', candidate: ev.candidate?.toJSON() ?? null })
+      this.events.onSignal(peerId, {
+        type: 'candidate',
+        candidate: ev.candidate ? ev.candidate.toJSON() : null,
+      })
     }
 
     pc.onnegotiationneeded = () => {
       if (this.peers.get(peerId)?.pc !== pc) return
+      // Chỉ offerer (hoặc đã negotiate) mới được tự offer từ event này.
+      if (!this.isOfferer(peerId) && !pc.remoteDescription) return
       void this.offer(peerId)
     }
 
@@ -164,49 +163,58 @@ export class PeerMesh {
         this.clearRecover(entry)
         entry.restarts = 0
         this.tunePeer(entry)
+        void this.syncPeer(entry)
       } else if (state === 'disconnected') {
-        this.scheduleRecover(peerId, 6000)
+        this.scheduleRecover(peerId, 4000)
       } else if (state === 'failed') {
-        this.scheduleRecover(peerId, 800)
+        this.scheduleRecover(peerId, 600)
       } else if (state === 'closed') {
         this.disconnect(peerId)
       }
     }
 
-    // CHỈ bên offerer được dựng layout. Nếu cả hai cùng dựng trên một PC thì
-    // thành 6 m-line: mỗi bên gửi trên nửa của mình, bên nhận map sai slot,
-    // và cam sẽ bị hiểu thành màn hình. Bên kia chỉ chờ offer, không được tự offer.
+    pc.oniceconnectionstatechange = () => {
+      if (this.peers.get(peerId)?.pc !== pc) return
+      if (pc.iceConnectionState === 'failed') this.scheduleRecover(peerId, 500)
+    }
+
+    // Chỉ offerer dựng layout. Answerer chờ offer rồi map slot.
     if (this.isOfferer(peerId)) {
       for (const role of SLOTS) this.createSlot(entry, role)
-      this.syncPeer(entry)
-      void this.offer(peerId)
+      void this.syncPeer(entry).then(() => this.offer(peerId))
+    } else {
+      // Mốc chờ offer — quá hạn thì rebuild để offerer gửi lại sạch.
+      entry.offeredAt = Date.now()
     }
 
     this.events.onLink(peerId, pc.connectionState)
     return pc
   }
 
-  /**
-   * Tin signaling có thể mất (Firebase chớp, tab vừa mở chưa kịp lắng nghe).
-   * Bên offerer chịu trách nhiệm gửi lại — gửi lại ĐÚNG offer cũ nên layout
-   * không đổi và bên kia xử lý lại vô hại.
-   */
-  private ensureOfferProgress(peerId: string, entry: PeerEntry) {
-    if (!this.isOfferer(peerId)) return
+  private ensureProgress(peerId: string, entry: PeerEntry) {
     const { pc } = entry
     if (pc.connectionState === 'connected' || pc.connectionState === 'closed') return
 
-    if (pc.signalingState === 'stable' && !pc.localDescription) {
-      void this.offer(peerId)
+    if (this.isOfferer(peerId)) {
+      if (pc.signalingState === 'stable' && !pc.currentRemoteDescription) {
+        void this.offer(peerId)
+        return
+      }
+      if (
+        pc.signalingState === 'have-local-offer' &&
+        pc.localDescription &&
+        Date.now() - entry.offeredAt > OFFER_RESEND_MS
+      ) {
+        entry.offeredAt = Date.now()
+        this.events.onSignal(peerId, { type: 'offer', sdp: this.desc(pc.localDescription) })
+      }
       return
     }
-    if (
-      pc.signalingState === 'have-local-offer' &&
-      pc.localDescription &&
-      Date.now() - entry.offeredAt > OFFER_RESEND_MS
-    ) {
+
+    // Answerer: quá lâu không nhận offer → rebuild (offerer watchdog sẽ offer lại).
+    if (!pc.remoteDescription && Date.now() - entry.offeredAt > ANSWERER_WAIT_MS) {
       entry.offeredAt = Date.now()
-      this.events.onSignal(peerId, { type: 'offer', sdp: this.desc(pc.localDescription) })
+      this.rebuild(peerId)
     }
   }
 
@@ -221,6 +229,7 @@ export class PeerMesh {
       entry.pc.onicecandidate = null
       entry.pc.onnegotiationneeded = null
       entry.pc.onconnectionstatechange = null
+      entry.pc.oniceconnectionstatechange = null
       entry.pc.close()
     } catch {
       /* ignore */
@@ -239,23 +248,20 @@ export class PeerMesh {
   private startWatchdog() {
     if (this.watchdog) return
     this.watchdog = window.setInterval(() => {
-      for (const [peerId, entry] of this.peers) this.ensureOfferProgress(peerId, entry)
+      for (const [peerId, entry] of this.peers) this.ensureProgress(peerId, entry)
     }, WATCHDOG_MS)
   }
 
-  /** Gọi khi mic/cam/share đổi track. Chỉ replaceTrack — không renegotiate. */
   syncLocalTracks() {
-    for (const entry of this.peers.values()) this.syncPeer(entry)
+    for (const entry of this.peers.values()) void this.syncPeer(entry)
   }
 
-  /** Cập nhật giới hạn băng thông theo số người và trạng thái share. */
   setQuality(peers: number, sharing: boolean) {
     if (this.quality.peers === peers && this.quality.sharing === sharing) return
     this.quality = { peers, sharing }
     for (const entry of this.peers.values()) this.tunePeer(entry)
   }
 
-  /** Ảnh chụp đường truyền để soi khi có máy không nhận được hình/tiếng. */
   async debug() {
     const out: Record<string, unknown> = {}
     for (const [peerId, entry] of this.peers) {
@@ -267,38 +273,15 @@ export class PeerMesh {
               mid: tr.mid,
               want: tr.direction,
               actual: tr.currentDirection,
-              sending: tr.sender.track ? `${tr.sender.track.kind}${tr.sender.track.enabled ? '' : ' (disabled)'}` : null,
+              sending: tr.sender.track
+                ? `${tr.sender.track.kind}${tr.sender.track.enabled ? '' : ' (disabled)'}`
+                : null,
               receiving: tr.receiver.track
                 ? `${tr.receiver.track.kind}${tr.receiver.track.muted ? ' (muted)' : ''}`
                 : null,
             }
           : null
       }
-
-      const rtp: Record<string, unknown> = {}
-      try {
-        const stats = await entry.pc.getStats()
-        stats.forEach((report) => {
-          const r = report as Record<string, unknown>
-          if (r.type === 'inbound-rtp') {
-            rtp[`in:${String(r.kind)}:${String(r.mid ?? r.id)}`] = {
-              packets: r.packetsReceived,
-              lost: r.packetsLost,
-              frames: r.framesDecoded,
-              size: r.frameWidth ? `${String(r.frameWidth)}x${String(r.frameHeight)}` : null,
-            }
-          } else if (r.type === 'outbound-rtp') {
-            rtp[`out:${String(r.kind)}:${String(r.mid ?? r.id)}`] = {
-              packets: r.packetsSent,
-              frames: r.framesEncoded,
-              size: r.frameWidth ? `${String(r.frameWidth)}x${String(r.frameHeight)}` : null,
-            }
-          }
-        })
-      } catch {
-        /* ignore */
-      }
-
       out[peerId] = {
         myRole: this.isOfferer(peerId) ? 'offerer' : 'answerer',
         connection: entry.pc.connectionState,
@@ -306,25 +289,28 @@ export class PeerMesh {
         signaling: entry.pc.signalingState,
         restarts: entry.restarts,
         slots,
-        rtp,
       }
     }
     return out
   }
 
-  async handleSignal(from: string, payload: SignalPayload) {
-    const prev = this.signalChain.get(from) ?? Promise.resolve()
-    const next = prev.then(() => this.processSignal(from, payload))
-    this.signalChain.set(from, next)
+  /** @returns false nếu xử lý lỗi — caller KHÔNG nên xóa signal trên Firebase */
+  async handleSignal(from: string, payload: SignalPayload): Promise<boolean> {
+    const prev = this.signalChain.get(from) ?? Promise.resolve(true)
+    const next = prev.then(
+      () => this.processSignal(from, payload),
+      () => this.processSignal(from, payload),
+    )
+    this.signalChain.set(
+      from,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
     return next
   }
 
-  /* ── slots ── */
-
-  /**
-   * Tạo slot. Có trình duyệt kén `sendEncodings` nên phải có đường lùi:
-   * nếu ném lỗi ở đây thì cả phiên sẽ không bao giờ gửi được offer.
-   */
   private createSlot(entry: PeerEntry, role: TrackRole) {
     if (entry.slots[role]) return entry.slots[role]
     const kind = role === 'mic' ? 'audio' : 'video'
@@ -346,10 +332,10 @@ export class PeerMesh {
     return tr
   }
 
-  /** Bên answerer: gán slot theo đúng thứ tự m-line của offer. */
   private mapSlots(entry: PeerEntry) {
     const videos: RTCRtpTransceiver[] = []
     for (const tr of entry.pc.getTransceivers()) {
+      if (tr.currentDirection === 'stopped') continue
       const kind = tr.receiver.track?.kind ?? tr.sender.track?.kind
       if (kind === 'audio') {
         if (!entry.slots.mic) entry.slots.mic = tr
@@ -357,11 +343,12 @@ export class PeerMesh {
         videos.push(tr)
       }
     }
+    // Sắp theo mid số để ổn định giữa các trình duyệt
+    videos.sort((a, b) => String(a.mid ?? '').localeCompare(String(b.mid ?? ''), undefined, { numeric: true }))
     if (!entry.slots.camera) entry.slots.camera = videos[0] ?? null
     if (!entry.slots.screen) entry.slots.screen = videos[1] ?? null
   }
 
-  /** Mở quyền gửi trên slot đã nhận từ offer (mặc định trình duyệt là recvonly). */
   private openSlots(entry: PeerEntry) {
     for (const role of SLOTS) {
       const tr = entry.slots[role]
@@ -378,17 +365,11 @@ export class PeerMesh {
 
   private roleOf(entry: PeerEntry, tr: RTCRtpTransceiver): TrackRole | null {
     for (const role of SLOTS) if (entry.slots[role] === tr) return role
-    // ontrack chạy trong lúc setRemoteDescription, trước khi kịp gán slot.
     this.mapSlots(entry)
     for (const role of SLOTS) if (entry.slots[role] === tr) return role
     return this.roleByPosition(entry, tr)
   }
 
-  /**
-   * Chốt hạ: suy ra role theo thứ tự m-line để không bao giờ mất track.
-   * Chỉ đếm các transceiver đang NHẬN, vì thứ tự trong danh sách nhận mới
-   * tương ứng với thứ tự mic → camera → screen mà bên kia gửi.
-   */
   private roleByPosition(entry: PeerEntry, tr: RTCRtpTransceiver): TrackRole | null {
     const track = tr.receiver.track
     if (!track) return null
@@ -397,18 +378,16 @@ export class PeerMesh {
     const receivingVideos = entry.pc
       .getTransceivers()
       .filter((t) => t.receiver.track?.kind === 'video' && t.currentDirection !== 'stopped')
+      .sort((a, b) => String(a.mid ?? '').localeCompare(String(b.mid ?? ''), undefined, { numeric: true }))
     const idx = receivingVideos.indexOf(tr)
     if (idx < 0) return null
     return idx === 0 ? 'camera' : 'screen'
   }
 
-  /**
-   * Chỉ điền track vào slot có sẵn. Tuyệt đối không tạo slot ở đây:
-   * tạo slot sẽ kích `negotiationneeded` và bên đang chờ offer lại đi offer,
-   * gây glare ngay giữa lúc bắt tay lần đầu.
-   */
-  private syncPeer(entry: PeerEntry) {
+  /** Await replaceTrack — bắt buộc trước createAnswer nếu không dễ one-way. */
+  private async syncPeer(entry: PeerEntry) {
     const tracks = this.getTracks()
+    const jobs: Promise<void>[] = []
     for (const role of SLOTS) {
       const want = tracks[role]
       const tr = entry.slots[role]
@@ -416,9 +395,13 @@ export class PeerMesh {
       const current = tr.sender.track
       if (current === want) continue
       if (current && want && current.id === want.id) continue
-      void tr.sender.replaceTrack(want ?? null).catch(() => {})
-      if (want) this.tuneSender(tr.sender, role)
+      jobs.push(
+        tr.sender.replaceTrack(want ?? null).then(() => {
+          if (want) this.tuneSender(tr.sender, role)
+        }),
+      )
     }
+    if (jobs.length) await Promise.allSettled(jobs)
   }
 
   private tunePeer(entry: PeerEntry) {
@@ -445,8 +428,6 @@ export class PeerMesh {
     void sender.setParameters(params).catch(() => {})
   }
 
-  /* ── negotiation ── */
-
   private async offer(peerId: string) {
     const entry = this.peers.get(peerId)
     if (!entry) return
@@ -454,6 +435,7 @@ export class PeerMesh {
     if (entry.makingOffer || pc.signalingState !== 'stable') return
     entry.makingOffer = true
     try {
+      await this.syncPeer(entry)
       await pc.setLocalDescription()
       if (this.peers.get(peerId) !== entry || !pc.localDescription) return
       entry.offeredAt = Date.now()
@@ -465,60 +447,65 @@ export class PeerMesh {
     }
   }
 
-  private async processSignal(from: string, payload: SignalPayload) {
+  private async processSignal(from: string, payload: SignalPayload): Promise<boolean> {
     if (!this.peers.has(from)) this.connect(from)
     const entry = this.peers.get(from)
-    if (!entry) return
+    if (!entry) return false
     const { pc } = entry
 
     try {
       if (payload.type === 'candidate') {
-        if (!payload.candidate) return
+        if (!payload.candidate) return true
         if (!pc.remoteDescription) {
           entry.iceQueue.push(payload.candidate)
-          return
+          return true
         }
         try {
           await pc.addIceCandidate(payload.candidate)
         } catch (err) {
           if (!entry.ignoreOffer) console.error('addIceCandidate', from, err)
         }
-        return
+        return true
       }
 
-      if (payload.type === 'answer' && pc.signalingState !== 'have-local-offer') return
+      if (payload.type === 'answer' && pc.signalingState !== 'have-local-offer') {
+        // Answer muộn / trùng — bỏ qua, coi như đã xử lý để không spam
+        return true
+      }
 
       const collision = payload.type === 'offer' && (entry.makingOffer || pc.signalingState !== 'stable')
       entry.ignoreOffer = !entry.polite && collision
-      if (entry.ignoreOffer) return
+      if (entry.ignoreOffer) return true
 
-      // Polite: setRemoteDescription tự rollback offer của mình khi có collision.
       await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
-      if (this.peers.get(from) !== entry) return
+      if (this.peers.get(from) !== entry) return false
       entry.ignoreOffer = false
+      entry.negotiatedAt = Date.now()
       await this.flushIce(entry)
 
       if (payload.type === 'offer') {
         this.mapSlots(entry)
         this.openSlots(entry)
-        this.syncPeer(entry)
+        // QUAN TRỌNG: phải gắn track xong rồi mới createAnswer
+        await this.syncPeer(entry)
         await pc.setLocalDescription()
-        if (this.peers.get(from) !== entry || !pc.localDescription) return
+        if (this.peers.get(from) !== entry || !pc.localDescription) return false
         this.events.onSignal(from, { type: 'answer', sdp: this.desc(pc.localDescription) })
       } else {
         this.mapSlots(entry)
-        this.syncPeer(entry)
+        await this.syncPeer(entry)
       }
       this.tunePeer(entry)
+      return true
     } catch (err) {
       console.error('processSignal', from, payload.type, err)
+      return false
     }
   }
 
   private async flushIce(entry: PeerEntry) {
     if (!entry.iceQueue.length || !entry.pc.remoteDescription) return
-    const queued = entry.iceQueue
-    entry.iceQueue = []
+    const queued = entry.iceQueue.splice(0, entry.iceQueue.length)
     for (const candidate of queued) {
       try {
         await entry.pc.addIceCandidate(candidate)
@@ -532,8 +519,6 @@ export class PeerMesh {
     return { type: d.type, sdp: d.sdp }
   }
 
-  /* ── hồi phục kết nối ── */
-
   private clearRecover(entry: PeerEntry) {
     if (entry.recoverTimer) {
       window.clearTimeout(entry.recoverTimer)
@@ -541,7 +526,6 @@ export class PeerMesh {
     }
   }
 
-  /** Ưu tiên ICE restart (giữ nguyên media), chỉ dựng lại PC khi thật sự chết. */
   private scheduleRecover(peerId: string, delay: number) {
     const entry = this.peers.get(peerId)
     if (!entry || entry.recoverTimer) return
@@ -552,7 +536,7 @@ export class PeerMesh {
       const state = entry.pc.connectionState
       if (state === 'connected' || state === 'closed') return
 
-      if (entry.restarts >= 3) {
+      if (entry.restarts >= 2) {
         this.rebuild(peerId)
         return
       }
@@ -562,8 +546,10 @@ export class PeerMesh {
       } catch {
         /* ignore */
       }
-      void this.offer(peerId)
-      this.scheduleRecover(peerId, 8000)
+      if (this.isOfferer(peerId) || entry.pc.signalingState === 'stable') {
+        void this.offer(peerId)
+      }
+      this.scheduleRecover(peerId, 6000)
     }, delay)
   }
 
