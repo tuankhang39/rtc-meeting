@@ -1519,6 +1519,13 @@
   border-top: 1px solid rgba(200, 150, 170, 0.25);
 }
 
+.beauty-skin {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(200, 150, 170, 0.25);
+}
+
 .beauty-lips-head {
   display: grid;
   gap: 2px;
@@ -1617,6 +1624,10 @@
 }
 
 [data-theme='dark'] .beauty-lips {
+  border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+[data-theme='dark'] .beauty-skin {
   border-top-color: rgba(148, 163, 184, 0.2);
 }
 

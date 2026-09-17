@@ -558,6 +558,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             onSelect={beauty.setPresetId}
             lip={beauty.lip}
             onLipChange={beauty.setLipOptions}
+            skin={beauty.skin}
+            onSkinChange={beauty.setSkinOptions}
             onClose={() => setShowBeauty(false)}
           />
         )}

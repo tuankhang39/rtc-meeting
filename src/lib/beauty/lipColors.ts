@@ -1,4 +1,4 @@
-/** Màu môi đang thịnh (2025–2026): rose, nude, nâu chocolate, cherry, berry */
+/** Bảng màu môi trending (đỏ / cam / hồng — soft blur edge) */
 
 export type LipSwatch = {
   id: string
@@ -8,12 +8,18 @@ export type LipSwatch = {
 }
 
 export const TRENDING_LIP_COLORS: LipSwatch[] = [
-  { id: 'rose', label: 'Rose khói', color: '#c47a8a', hint: 'Smoky rose' },
-  { id: 'nude', label: 'Nude đào', color: '#d4a08c', hint: 'Peachy nude' },
-  { id: 'choc', label: 'Chocolate', color: '#8b5a4a', hint: 'Brown / taupe' },
-  { id: 'cherry', label: 'Cherry', color: '#b83245', hint: 'Cherry / brick' },
-  { id: 'berry', label: 'Berry', color: '#8e3a5b', hint: 'Wine / plum' },
-  { id: 'coral', label: 'Coral', color: '#e07a6a', hint: 'Warm coral' },
+  { id: 'do-cam', label: 'Đỏ cam', color: '#e04a32', hint: 'Orange red' },
+  { id: 'do-ruby', label: 'Đỏ ruby', color: '#c41e3a', hint: 'Ruby red' },
+  { id: 'do-hong', label: 'Đỏ hồng', color: '#e84568', hint: 'Pink red' },
+  { id: 'do-cherry', label: 'Đỏ cherry', color: '#9a1a2e', hint: 'Cherry red' },
+  { id: 'cam-nude', label: 'Cam nude', color: '#c9927a', hint: 'Nude orange' },
+  { id: 'cam-gach', label: 'Cam gạch', color: '#c45a38', hint: 'Brick orange' },
+  { id: 'cam-dao', label: 'Cam đào', color: '#e8a890', hint: 'Peach orange' },
+  { id: 'cam-san-ho', label: 'Cam san hô', color: '#f07050', hint: 'Coral orange' },
+  { id: 'hong-dat', label: 'Hồng đất', color: '#b87a7e', hint: 'Dusty pink' },
+  { id: 'hong-berry', label: 'Hồng berry', color: '#d9406a', hint: 'Berry pink' },
+  { id: 'hong-baby', label: 'Hồng baby', color: '#e85a9a', hint: 'Baby / fuchsia pink' },
+  { id: 'hong-dau', label: 'Hồng dâu', color: '#e85a7a', hint: 'Strawberry pink' },
 ]
 
 export type LipOptions = {

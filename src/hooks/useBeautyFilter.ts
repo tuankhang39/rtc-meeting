@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BeautyEngine, type BeautyEngineStatus } from '../lib/beauty/engine'
 import { DEFAULT_LIP, type LipOptions } from '../lib/beauty/lipColors'
+import { DEFAULT_SKIN, type SkinOptions } from '../lib/beauty/skin'
 import { filterActive, type FilterPresetId } from '../lib/beauty/presets'
 
 type Args = {
@@ -12,6 +13,7 @@ type Args = {
 export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
   const [presetId, setPresetId] = useState<FilterPresetId>('none')
   const [lip, setLip] = useState<LipOptions>(() => ({ ...DEFAULT_LIP }))
+  const [skin, setSkin] = useState<SkinOptions>(() => ({ ...DEFAULT_SKIN }))
   const [status, setStatus] = useState<BeautyEngineStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
@@ -20,6 +22,8 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
   presetRef.current = presetId
   const lipRef = useRef(lip)
   lipRef.current = lip
+  const skinRef = useRef(skin)
+  skinRef.current = skin
   const onOutputRef = useRef(onOutputTrack)
   onOutputRef.current = onOutputTrack
   const sourceRef = useRef(sourceTrack)
@@ -32,12 +36,21 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
   const reset = useCallback(() => {
     setPresetId('none')
     setLip({ ...DEFAULT_LIP })
+    setSkin({ ...DEFAULT_SKIN })
   }, [])
 
   const setLipOptions = useCallback((patch: Partial<LipOptions>) => {
     setLip((prev) => {
       const next = { ...prev, ...patch }
       engineRef.current?.setLipOptions(next)
+      return next
+    })
+  }, [])
+
+  const setSkinOptions = useCallback((patch: Partial<SkinOptions>) => {
+    setSkin((prev) => {
+      const next = { ...prev, ...patch }
+      engineRef.current?.setSkinOptions(next)
       return next
     })
   }, [])
@@ -65,7 +78,7 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
       try {
         let eng = engineRef.current
         if (!eng) {
-          eng = new BeautyEngine(id, lipRef.current)
+          eng = new BeautyEngine(id, lipRef.current, skinRef.current)
           eng.setStatusHandler((st, err) => {
             if (unmountedRef.current) return
             setStatus(st)
@@ -82,6 +95,7 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
         } else {
           eng.setPreset(id)
           eng.setLipOptions(lipRef.current)
+          eng.setSkinOptions(skinRef.current)
           let out = eng.getOutputTrack()
           if (!out || out.readyState !== 'live') {
             out = await eng.start(src)
@@ -115,6 +129,10 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
   }, [lip])
 
   useEffect(() => {
+    engineRef.current?.setSkinOptions(skin)
+  }, [skin])
+
+  useEffect(() => {
     unmountedRef.current = false
     return () => {
       unmountedRef.current = true
@@ -130,6 +148,8 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
     setPresetId,
     lip,
     setLipOptions,
+    skin,
+    setSkinOptions,
     reset,
     status,
     error,

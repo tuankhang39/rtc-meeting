@@ -1,5 +1,6 @@
 import { filterActive, getFilterPreset, type FilterPresetId } from './presets'
 import { DEFAULT_LIP, hexToRgb, type LipOptions } from './lipColors'
+import { DEFAULT_SKIN, type SkinOptions } from './skin'
 
 export type BeautyEngineStatus = 'idle' | 'loading' | 'running' | 'error'
 
@@ -12,6 +13,14 @@ const UPPER_OUTER = [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291]
 const UPPER_INNER = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308]
 const LOWER_OUTER = [291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61]
 const LOWER_INNER = [308, 324, 318, 402, 317, 14, 87, 178, 88, 95, 78]
+
+/** Viền mặt + mắt (khoét mắt để giữ nét) */
+const FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+  176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+]
+const LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+const RIGHT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
 
 type FaceLandmarker = {
   detectForVideo: (
@@ -58,23 +67,26 @@ function pathFrom(
 
 /**
  * Filter nhẹ.
- * - Mịn da: pixel da (không model)
- * - Môi đỏ: MediaPipe Face Landmarker — chỉ điểm môi, lazy-load
+ * - Mịn / sáng da: Face Landmarker oval (model đã load cho môi — không thêm model)
+ * - Môi: cùng landmark, lazy-load
  */
 export class BeautyEngine {
   private video = document.createElement('video')
   private canvas = document.createElement('canvas')
   private workCanvas = document.createElement('canvas')
+  private faceMask = document.createElement('canvas')
   private lipMask = document.createElement('canvas')
   private lipTint = document.createElement('canvas')
   private ctx: CanvasRenderingContext2D
   private workCtx: CanvasRenderingContext2D
+  private faceMaskCtx: CanvasRenderingContext2D
   private lipMaskCtx: CanvasRenderingContext2D
   private lipTintCtx: CanvasRenderingContext2D
   private out: MediaStream | null = null
   private outTrack: MediaStreamTrack | null = null
   private presetId: FilterPresetId = 'none'
   private lip: LipOptions = { ...DEFAULT_LIP }
+  private skin: SkinOptions = { ...DEFAULT_SKIN }
   private raf = 0
   private frame = 0
   private running = false
@@ -83,16 +95,25 @@ export class BeautyEngine {
   private onStatus: ((s: BeautyEngineStatus, err?: string) => void) | null = null
   private onTrack: ((t: MediaStreamTrack | null) => void) | null = null
 
-  constructor(presetId: FilterPresetId = 'none', lip: LipOptions = DEFAULT_LIP) {
+  constructor(
+    presetId: FilterPresetId = 'none',
+    lip: LipOptions = DEFAULT_LIP,
+    skin: SkinOptions = DEFAULT_SKIN,
+  ) {
     this.presetId = presetId
     this.lip = { ...lip }
+    this.skin = { ...skin }
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })
     const workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true })
+    const faceMaskCtx = this.faceMask.getContext('2d')
     const lipMaskCtx = this.lipMask.getContext('2d')
     const lipTintCtx = this.lipTint.getContext('2d')
-    if (!ctx || !workCtx || !lipMaskCtx || !lipTintCtx) throw new Error('Canvas 2D không khả dụng')
+    if (!ctx || !workCtx || !faceMaskCtx || !lipMaskCtx || !lipTintCtx) {
+      throw new Error('Canvas 2D không khả dụng')
+    }
     this.ctx = ctx
     this.workCtx = workCtx
+    this.faceMaskCtx = faceMaskCtx
     this.lipMaskCtx = lipMaskCtx
     this.lipTintCtx = lipTintCtx
     this.video.playsInline = true
@@ -122,6 +143,10 @@ export class BeautyEngine {
 
   setLipOptions(lip: LipOptions) {
     this.lip = { ...lip }
+  }
+
+  setSkinOptions(skin: SkinOptions) {
+    this.skin = { ...skin }
   }
 
   async start(source: MediaStreamTrack): Promise<MediaStreamTrack> {
@@ -167,6 +192,8 @@ export class BeautyEngine {
   private resize(w: number, h: number) {
     this.canvas.width = w
     this.canvas.height = h
+    this.faceMask.width = w
+    this.faceMask.height = h
     this.lipMask.width = w
     this.lipMask.height = h
     this.lipTint.width = w
@@ -199,17 +226,14 @@ export class BeautyEngine {
     this.ctx.filter = 'none'
   }
 
-  private drawNatural(css: string) {
+  private drawNatural(_css: string) {
     const w = this.canvas.width
     const h = this.canvas.height
 
-    this.ctx.filter = css
-    this.ctx.drawImage(this.video, 0, 0, w, h)
+    // Frame gốc — sáng/mịn chỉ trong mask mặt (không đụng nền)
     this.ctx.filter = 'none'
+    this.ctx.drawImage(this.video, 0, 0, w, h)
 
-    this.smoothSkinOnly()
-
-    // Detect môi mỗi frame — khớp miệng, không lệch chỗ
     if (this.face) {
       try {
         const res = this.face.detectForVideo(this.video, performance.now())
@@ -220,16 +244,24 @@ export class BeautyEngine {
       }
     }
 
-    if (this.smoothLips) this.drawLipsFromLandmarks(this.smoothLips)
+    if (this.smoothLips) {
+      this.buildFaceMask(this.smoothLips)
+      this.brightenFace()
+      this.smoothFaceSkin()
+      this.drawLipsFromLandmarks(this.smoothLips)
+      return
+    }
+
+    // Fallback khi chưa có face: mịn nhẹ theo màu da
+    this.smoothSkinFallback()
   }
 
-  /** Lerp landmark để môi bám miệng mượt, không giật / không lệch frame */
+  /** Lerp landmark để môi / mặt bám mượt */
   private updateSmoothLips(next: Array<{ x: number; y: number }>) {
     if (!this.smoothLips || this.smoothLips.length !== next.length) {
       this.smoothLips = next.map((p) => ({ x: p.x, y: p.y }))
       return
     }
-    // 0.55 theo frame mới → bám miệng nhanh, vẫn mềm
     const a = 0.55
     for (let i = 0; i < next.length; i++) {
       const p = next[i]!
@@ -237,6 +269,54 @@ export class BeautyEngine {
       s.x = s.x * (1 - a) + p.x * a
       s.y = s.y * (1 - a) + p.y * a
     }
+  }
+
+  private buildFaceMask(landmarks: Array<{ x: number; y: number }>) {
+    const w = this.faceMask.width
+    const h = this.faceMask.height
+    this.faceMaskCtx.clearRect(0, 0, w, h)
+    this.faceMaskCtx.fillStyle = '#fff'
+    this.faceMaskCtx.beginPath()
+    pathFrom(this.faceMaskCtx, landmarks, FACE_OVAL, w, h)
+    this.faceMaskCtx.fill()
+
+    // Khoét mắt — giữ nét mắt
+    this.faceMaskCtx.globalCompositeOperation = 'destination-out'
+    this.faceMaskCtx.beginPath()
+    pathFrom(this.faceMaskCtx, landmarks, LEFT_EYE, w, h)
+    this.faceMaskCtx.fill()
+    this.faceMaskCtx.beginPath()
+    pathFrom(this.faceMaskCtx, landmarks, RIGHT_EYE, w, h)
+    this.faceMaskCtx.fill()
+    this.faceMaskCtx.globalCompositeOperation = 'source-over'
+
+    // Viền mặt mềm
+    this.faceMaskCtx.filter = 'blur(10px)'
+    this.faceMaskCtx.drawImage(this.faceMask, 0, 0)
+    this.faceMaskCtx.filter = 'none'
+  }
+
+  private brightenFace() {
+    const bright = Math.max(0, Math.min(100, this.skin.brighten)) / 100
+    if (bright < 0.02) return
+
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const brightness = 1 + bright * 0.22
+    const contrast = 1 - bright * 0.03
+    const saturate = 1 + bright * 0.05
+
+    this.lipTintCtx.clearRect(0, 0, w, h)
+    this.lipTintCtx.filter = `brightness(${brightness.toFixed(3)}) contrast(${contrast.toFixed(3)}) saturate(${saturate.toFixed(3)})`
+    this.lipTintCtx.drawImage(this.canvas, 0, 0)
+    this.lipTintCtx.filter = 'none'
+    this.lipTintCtx.globalCompositeOperation = 'destination-in'
+    this.lipTintCtx.drawImage(this.faceMask, 0, 0)
+    this.lipTintCtx.globalCompositeOperation = 'source-over'
+
+    this.ctx.globalAlpha = 0.55 + bright * 0.4
+    this.ctx.drawImage(this.lipTint, 0, 0)
+    this.ctx.globalAlpha = 1
   }
 
   private isSkin(r: number, g: number, b: number) {
@@ -250,13 +330,22 @@ export class BeautyEngine {
     return true
   }
 
-  private smoothSkinOnly() {
+  /** Mịn trong oval mặt + chỉ pixel da (không đụng tóc / nền) */
+  private smoothFaceSkin() {
+    const smooth = Math.max(0, Math.min(100, this.skin.smooth)) / 100
+    if (smooth < 0.02) return
+
     const sw = this.workCanvas.width
     const sh = this.workCanvas.height
     this.workCtx.drawImage(this.canvas, 0, 0, sw, sh)
     const img = this.workCtx.getImageData(0, 0, sw, sh)
     const d = img.data
     const src = new Uint8ClampedArray(d)
+
+    const mix = 0.35 + smooth * 0.43
+    const liftR = 2 + smooth * 5
+    const liftG = 1.5 + smooth * 4
+    const liftB = 1 + smooth * 3
 
     for (let y = 1; y < sh - 1; y++) {
       for (let x = 1; x < sw - 1; x++) {
@@ -284,15 +373,72 @@ export class BeautyEngine {
           }
         }
         if (n < 3) continue
-        const mix = 0.62
-        d[i] = Math.min(255, r * (1 - mix) + (sr / n) * mix + 4)
-        d[i + 1] = Math.min(255, g * (1 - mix) + (sg / n) * mix + 3)
-        d[i + 2] = Math.min(255, b * (1 - mix) + (sb / n) * mix + 2)
+        d[i] = Math.min(255, r * (1 - mix) + (sr / n) * mix + liftR)
+        d[i + 1] = Math.min(255, g * (1 - mix) + (sg / n) * mix + liftG)
+        d[i + 2] = Math.min(255, b * (1 - mix) + (sb / n) * mix + liftB)
       }
     }
 
     this.workCtx.putImageData(img, 0, 0)
-    this.ctx.globalAlpha = 0.72
+    // Chỉ phủ trong vùng mặt
+    this.workCtx.globalCompositeOperation = 'destination-in'
+    this.workCtx.drawImage(this.faceMask, 0, 0, sw, sh)
+    this.workCtx.globalCompositeOperation = 'source-over'
+
+    this.ctx.globalAlpha = 0.4 + smooth * 0.45
+    this.ctx.drawImage(this.workCanvas, 0, 0, this.canvas.width, this.canvas.height)
+    this.ctx.globalAlpha = 1
+  }
+
+  /** Khi chưa detect được mặt */
+  private smoothSkinFallback() {
+    const smooth = Math.max(0, Math.min(100, this.skin.smooth)) / 100
+    const bright = Math.max(0, Math.min(100, this.skin.brighten)) / 100
+    if (bright >= 0.02) {
+      const brightness = 1 + bright * 0.12
+      this.ctx.filter = `brightness(${brightness.toFixed(3)})`
+      this.ctx.drawImage(this.canvas, 0, 0)
+      this.ctx.filter = 'none'
+    }
+    if (smooth < 0.02) return
+
+    const sw = this.workCanvas.width
+    const sh = this.workCanvas.height
+    this.workCtx.drawImage(this.canvas, 0, 0, sw, sh)
+    const img = this.workCtx.getImageData(0, 0, sw, sh)
+    const d = img.data
+    const src = new Uint8ClampedArray(d)
+    const mix = 0.3 + smooth * 0.35
+
+    for (let y = 1; y < sh - 1; y++) {
+      for (let x = 1; x < sw - 1; x++) {
+        const i = (y * sw + x) * 4
+        const r = src[i]!
+        const g = src[i + 1]!
+        const b = src[i + 2]!
+        if (!this.isSkin(r, g, b)) continue
+        let sr = 0
+        let sg = 0
+        let sb = 0
+        let n = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const j = ((y + dy) * sw + (x + dx)) * 4
+            if (!this.isSkin(src[j]!, src[j + 1]!, src[j + 2]!)) continue
+            sr += src[j]!
+            sg += src[j + 1]!
+            sb += src[j + 2]!
+            n++
+          }
+        }
+        if (n < 3) continue
+        d[i] = Math.min(255, r * (1 - mix) + (sr / n) * mix)
+        d[i + 1] = Math.min(255, g * (1 - mix) + (sg / n) * mix)
+        d[i + 2] = Math.min(255, b * (1 - mix) + (sb / n) * mix)
+      }
+    }
+    this.workCtx.putImageData(img, 0, 0)
+    this.ctx.globalAlpha = 0.35 + smooth * 0.35
     this.ctx.drawImage(this.workCanvas, 0, 0, this.canvas.width, this.canvas.height)
     this.ctx.globalAlpha = 1
   }
