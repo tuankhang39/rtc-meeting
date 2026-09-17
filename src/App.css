@@ -787,19 +787,41 @@
   color: #c48a22;
 }
 
-.star-board-give {
+.star-board-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.star-board-give,
+.star-board-take {
   border: 1px solid rgba(232, 176, 80, 0.5);
   border-radius: 999px;
   background: rgba(255, 244, 214, 0.9);
   color: #8a5a12;
   font-weight: 800;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   padding: 4px 10px;
+  min-width: 32px;
   cursor: pointer;
 }
 
 .star-board-give:hover {
   background: #fff4d4;
+}
+
+.star-board-take {
+  border-color: rgba(180, 120, 120, 0.45);
+  background: rgba(255, 236, 236, 0.9);
+  color: #8a3030;
+}
+
+.star-board-take:hover:not(:disabled) {
+  background: #ffe0e0;
+}
+
+.star-board-take:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .stage-layout {
@@ -1059,6 +1081,16 @@
 .tile-star-btn:hover {
   transform: scale(1.06);
   background: #fff;
+}
+
+.tile-star-btn.take {
+  color: #c45a5a;
+}
+
+.tile-star-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .tile-star-count {

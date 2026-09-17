@@ -24,6 +24,7 @@ type Props = {
   stars?: number
   canStar?: boolean
   onStar?: () => void
+  onTakeStar?: () => void
   starBurst?: boolean
   playfulEffects?: PlayfulEffect[]
   /** Hiện thay avatar khi chưa có hình (dùng cho khung màn hình đang share). */
@@ -48,6 +49,7 @@ export function VideoTile({
   stars = 0,
   canStar = false,
   onStar,
+  onTakeStar,
   starBurst = false,
   playfulEffects = [],
   placeholder,
@@ -138,18 +140,33 @@ export function VideoTile({
 
       <div className="tile-actions">
         {canStar && (
-          <button
-            type="button"
-            className="tile-star-btn"
-            title={`Tặng sao cho ${label}`}
-            aria-label={`Tặng sao ${label}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onStar?.()
-            }}
-          >
-            ⭐
-          </button>
+          <>
+            <button
+              type="button"
+              className="tile-star-btn"
+              title={`Tặng sao cho ${label}`}
+              aria-label={`Tặng sao ${label}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onStar?.()
+              }}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className="tile-star-btn take"
+              title={`Trừ sao của ${label}`}
+              aria-label={`Trừ sao ${label}`}
+              disabled={stars <= 0}
+              onClick={(e) => {
+                e.stopPropagation()
+                onTakeStar?.()
+              }}
+            >
+              −
+            </button>
+          </>
         )}
         {canMute && micOn && (
           <button

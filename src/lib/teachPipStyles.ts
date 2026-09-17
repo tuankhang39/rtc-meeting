@@ -81,6 +81,23 @@ export const TEACH_PIP_CSS = `
     outline-offset: -3px;
   }
   .teach-strip-tile.is-speaking { outline-color: #2ee56b; }
+  .teach-strip-tile.is-pinned {
+    outline-color: #efbf5a;
+    order: -1;
+  }
+  .teach-strip-pin {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 2;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(0,0,0,.65);
+    color: #efbf5a;
+    font-size: 10px;
+    font-weight: 700;
+    pointer-events: none;
+  }
   .teach-strip-tile video {
     display: block;
     width: ${TEACH_PIP_WIDTH}px;
@@ -174,7 +191,9 @@ export const TEACH_PIP_CSS = `
     line-height: 1;
     cursor: pointer;
   }
+  .teach-strip-star-btn.take { color: #ff8a8a; }
   .teach-strip-star-btn:hover { background: rgba(196, 138, 34, .9); color: #fff; }
+  .teach-strip-star-btn:disabled { opacity: .35; cursor: not-allowed; }
   .teach-pip-dock {
     flex: 0 0 auto;
     display: grid;

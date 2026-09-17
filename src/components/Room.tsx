@@ -74,6 +74,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     sendReaction,
     sendPlayful,
     giveStar,
+    takeStar,
     sendQuickComment,
     placeScreenSticker,
     removeScreenSticker,
@@ -152,7 +153,11 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           joinedAt: p?.joinedAt ?? 0,
         }
       })
-      .sort((a, b) => a.joinedAt - b.joinedAt)
+      .sort((a, b) => {
+        if (a.isHost && !b.isHost) return -1
+        if (!a.isHost && b.isHost) return 1
+        return a.joinedAt - b.joinedAt
+      })
   }, [participants, remotes, userId])
 
   const linkWarnRef = useRef(false)
@@ -252,23 +257,61 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     push(`Đã tắt mic của ${name}`, 'ok')
   }
 
-  const pipPeople = useMemo(
-    () =>
-      otherPeople.map((r) => ({
+  const pipPeople = useMemo(() => {
+    const remotes = [...otherPeople]
+      .sort((a, b) => {
+        if (a.isHost && !b.isHost) return -1
+        if (!a.isHost && b.isHost) return 1
+        return a.joinedAt - b.joinedAt
+      })
+      .map((r) => ({
         id: r.userId,
         stream: r.camStream,
         label: r.name,
         micOn: r.mic,
         camOn: r.camera,
         isHostUser: r.isHost,
+        pinned: r.isHost,
         stars: starScores[r.userId]?.count ?? 0,
-      })),
-    [otherPeople, starScores],
-  )
+      }))
+
+    // Giáo viên đang share: luôn ghim cam của mình lên đầu thanh Học viên
+    if (isHost && screenSharing) {
+      return [
+        {
+          id: userId,
+          stream: localStream,
+          label: displayName,
+          micOn,
+          camOn,
+          isHostUser: true,
+          mirror: true,
+          self: true,
+          pinned: true,
+          stars: starScores[userId]?.count ?? 0,
+        },
+        ...remotes,
+      ]
+    }
+
+    return remotes
+  }, [
+    otherPeople,
+    starScores,
+    isHost,
+    screenSharing,
+    userId,
+    localStream,
+    displayName,
+    micOn,
+    camOn,
+  ])
+
   const teachPip = useTeachPip(pipPeople, {
     micOn,
     camOn,
     isHost,
+    myUserId: userId,
     onToggleMic: () => void toggleMic(),
     onToggleCam: () => void toggleCam(),
     onStopShare: () => void toggleScreenShare(),
@@ -281,6 +324,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         count: starScores[id]?.count ?? 0,
       })),
     onGiveStar: (id, name) => void giveStar(id, name),
+    onTakeStar: (id, name) => void takeStar(id, name),
   })
   const wasSharingRef = useRef(false)
 
@@ -338,6 +382,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             stars={starScores[r.userId]?.count ?? 0}
             canStar={isHost}
             onStar={() => void giveStar(r.userId, r.name)}
+            onTakeStar={() => void takeStar(r.userId, r.name)}
             starBurst={Boolean(starFxByUser[r.userId]?.length)}
           />
         ))}
@@ -540,6 +585,9 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             myUserId={userId}
             onGive={(id, name) => {
               void giveStar(id, name)
+            }}
+            onTake={(id, name) => {
+              void takeStar(id, name)
             }}
           />
         )}

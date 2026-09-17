@@ -5,9 +5,10 @@ type Props = {
   scores: Record<string, StarScore>
   myUserId: string
   onGive: (targetId: string, name: string) => void
+  onTake: (targetId: string, name: string) => void
 }
 
-export function StarBoard({ participants, scores, myUserId, onGive }: Props) {
+export function StarBoard({ participants, scores, myUserId, onGive, onTake }: Props) {
   const rows = Object.entries(participants)
     .map(([id, p]) => ({
       id,
@@ -31,14 +32,25 @@ export function StarBoard({ participants, scores, myUserId, onGive }: Props) {
             </span>
             <span className="star-board-count">⭐ {row.count}</span>
             {!row.self && (
-              <button
-                type="button"
-                className="star-board-give"
-                title={`Tặng sao cho ${row.name}`}
-                onClick={() => onGive(row.id, row.name)}
-              >
-                Tặng
-              </button>
+              <div className="star-board-actions">
+                <button
+                  type="button"
+                  className="star-board-give"
+                  title={`Tặng sao cho ${row.name}`}
+                  onClick={() => onGive(row.id, row.name)}
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="star-board-take"
+                  title={`Trừ sao của ${row.name}`}
+                  disabled={row.count <= 0}
+                  onClick={() => onTake(row.id, row.name)}
+                >
+                  −
+                </button>
+              </div>
             )}
           </div>
         ))

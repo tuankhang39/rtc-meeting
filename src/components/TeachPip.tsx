@@ -12,6 +12,8 @@ export type TeachPipPerson = {
   camOn: boolean
   isHostUser?: boolean
   mirror?: boolean
+  self?: boolean
+  pinned?: boolean
   stars?: number
 }
 
@@ -25,12 +27,14 @@ export type TeachPipDock = {
   micOn: boolean
   camOn: boolean
   isHost?: boolean
+  myUserId?: string
   onToggleMic: () => void
   onToggleCam: () => void
   onStopShare: () => void
   onQuickComment: (comment: QuickComment) => void
   starTargets: TeachPipStarTarget[]
   onGiveStar: (id: string, name: string) => void
+  onTakeStar: (id: string, name: string) => void
 }
 
 type Props = {
@@ -44,10 +48,12 @@ function StripTile({
   person,
   canStar,
   onGiveStar,
+  onTakeStar,
 }: {
   person: TeachPipPerson
   canStar: boolean
   onGiveStar: (id: string, name: string) => void
+  onTakeStar: (id: string, name: string) => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const speaking = useSpeaking(person.stream, person.micOn)
@@ -56,7 +62,17 @@ function StripTile({
   const stars = person.stars ?? 0
 
   return (
-    <div className={`teach-strip-tile${speaking ? ' is-speaking' : ''}${showVideo ? '' : ' cam-off'}`}>
+    <div
+      className={[
+        'teach-strip-tile',
+        speaking ? 'is-speaking' : '',
+        showVideo ? '' : 'cam-off',
+        person.pinned || person.isHostUser ? 'is-pinned' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {(person.pinned || person.isHostUser) && <span className="teach-strip-pin">Ghim · Host</span>}
       <video
         ref={videoRef}
         autoPlay
@@ -70,7 +86,10 @@ function StripTile({
       {!showVideo && <div className="teach-strip-avatar">{person.label.slice(0, 1).toUpperCase()}</div>}
       <div className="teach-strip-meta">
         <div className="teach-strip-meta-left">
-          <span className="teach-strip-name">{person.label}</span>
+          <span className="teach-strip-name">
+            {person.label}
+            {person.self ? ' (bạn)' : ''}
+          </span>
           <span className="teach-strip-stars">⭐ {stars}</span>
         </div>
         <div className="teach-strip-meta-right">
@@ -80,15 +99,27 @@ function StripTile({
             </span>
           )}
           {canStar && (
-            <button
-              type="button"
-              className="teach-strip-star-btn"
-              title={`Tặng sao cho ${person.label}`}
-              aria-label={`Tặng sao ${person.label}`}
-              onClick={() => onGiveStar(person.id, person.label)}
-            >
-              ⭐
-            </button>
+            <>
+              <button
+                type="button"
+                className="teach-strip-star-btn"
+                title={`Tặng sao cho ${person.label}`}
+                aria-label={`Tặng sao ${person.label}`}
+                onClick={() => onGiveStar(person.id, person.label)}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="teach-strip-star-btn take"
+                title={`Trừ sao của ${person.label}`}
+                aria-label={`Trừ sao ${person.label}`}
+                disabled={stars <= 0}
+                onClick={() => onTakeStar(person.id, person.label)}
+              >
+                −
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -133,8 +164,9 @@ export function TeachPipGrid({ people, dock, panel, onPanel }: Props) {
               <StripTile
                 key={p.id}
                 person={p}
-                canStar={Boolean(dock.isHost)}
+                canStar={Boolean(dock.isHost) && p.id !== dock.myUserId && !p.self}
                 onGiveStar={dock.onGiveStar}
+                onTakeStar={dock.onTakeStar}
               />
             ))}
           </div>

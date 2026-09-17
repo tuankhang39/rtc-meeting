@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   get,
-  increment,
   onChildAdded,
   onDisconnect,
   onValue,
@@ -96,6 +95,8 @@ export type StarGift = {
   fromUserId: string
   fromName: string
   createdAt: number
+  /** +1 tặng / -1 trừ — mặc định +1 cho dữ liệu cũ */
+  delta?: number
 }
 
 type UseRoomOptions = {
@@ -809,7 +810,12 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           const from = val.fromName || 'Ai đó'
           const to = val.toName || 'học viên'
           const mine = val.toUserId === userId
-          setPlayfulToast(mine ? `${from} tặng bạn một ngôi sao ⭐` : `${from} tặng sao cho ${to} ⭐`)
+          const delta = val.delta ?? 1
+          if (delta < 0) {
+            setPlayfulToast(mine ? `${from} trừ bạn một ngôi sao ⭐` : `${from} trừ sao của ${to}`)
+          } else {
+            setPlayfulToast(mine ? `${from} tặng bạn một ngôi sao ⭐` : `${from} tặng sao cho ${to} ⭐`)
+          }
           window.setTimeout(() => setPlayfulToast(null), 2800)
         })
         cleanups.push(() => unsubStarGifts())
@@ -1060,11 +1066,11 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     await remove(ref(getDb(), `rooms/${roomId}/stickers`))
   }, [roomId])
 
-  const giveStar = useCallback(
-    async (targetId: string, targetName?: string) => {
+  const adjustStar = useCallback(
+    async (targetId: string, delta: 1 | -1, targetName?: string) => {
       if (!isHostRef.current || targetId === userId) return
       const now = Date.now()
-      if (now - starCooldownRef.current < 700) return
+      if (now - starCooldownRef.current < 500) return
       starCooldownRef.current = now
 
       const fromName = displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`
@@ -1075,19 +1081,40 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         `User-${targetId.slice(0, 4)}`
 
       const db = getDb()
-      await update(ref(db, `rooms/${roomId}/stars/${targetId}`), {
-        count: increment(1),
-        name: toName,
+      const scoreRef = ref(db, `rooms/${roomId}/stars/${targetId}`)
+      const tx = await runTransaction(scoreRef, (current) => {
+        const cur = (current as StarScore | null) ?? { count: 0, name: toName }
+        const prev = typeof cur.count === 'number' ? cur.count : 0
+        const next = Math.max(0, prev + delta)
+        if (next === prev) return // đã 0 — không trừ tiếp
+        return { count: next, name: toName }
       })
+      if (!tx.committed) return
+
       await push(ref(db, `rooms/${roomId}/starGifts`), {
         toUserId: targetId,
         toName,
         fromUserId: userId,
         fromName,
         createdAt: Date.now(),
+        delta,
       })
     },
     [participants, roomId, starScores, userId],
+  )
+
+  const giveStar = useCallback(
+    async (targetId: string, targetName?: string) => {
+      await adjustStar(targetId, 1, targetName)
+    },
+    [adjustStar],
+  )
+
+  const takeStar = useCallback(
+    async (targetId: string, targetName?: string) => {
+      await adjustStar(targetId, -1, targetName)
+    },
+    [adjustStar],
   )
 
   const sendPlayful = useCallback(
@@ -1181,6 +1208,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     sendReaction,
     sendPlayful,
     giveStar,
+    takeStar,
     sendQuickComment,
     placeScreenSticker,
     removeScreenSticker,
