@@ -1,4 +1,5 @@
 import { filterActive, getFilterPreset, type FilterPresetId } from './presets'
+import { DEFAULT_LIP, hexToRgb, type LipOptions } from './lipColors'
 
 export type BeautyEngineStatus = 'idle' | 'loading' | 'running' | 'error'
 
@@ -73,6 +74,7 @@ export class BeautyEngine {
   private out: MediaStream | null = null
   private outTrack: MediaStreamTrack | null = null
   private presetId: FilterPresetId = 'none'
+  private lip: LipOptions = { ...DEFAULT_LIP }
   private raf = 0
   private frame = 0
   private running = false
@@ -81,8 +83,9 @@ export class BeautyEngine {
   private onStatus: ((s: BeautyEngineStatus, err?: string) => void) | null = null
   private onTrack: ((t: MediaStreamTrack | null) => void) | null = null
 
-  constructor(presetId: FilterPresetId = 'none') {
+  constructor(presetId: FilterPresetId = 'none', lip: LipOptions = DEFAULT_LIP) {
     this.presetId = presetId
+    this.lip = { ...lip }
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })
     const workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true })
     const lipMaskCtx = this.lipMask.getContext('2d')
@@ -115,6 +118,10 @@ export class BeautyEngine {
 
   setPreset(id: FilterPresetId) {
     this.presetId = id
+  }
+
+  setLipOptions(lip: LipOptions) {
+    this.lip = { ...lip }
   }
 
   async start(source: MediaStreamTrack): Promise<MediaStreamTrack> {
@@ -293,6 +300,9 @@ export class BeautyEngine {
   private drawLipsFromLandmarks(landmarks: Array<{ x: number; y: number }>) {
     const w = this.canvas.width
     const h = this.canvas.height
+    const { r, g, b } = hexToRgb(this.lip.color)
+    const intensity = Math.max(0, Math.min(100, this.lip.intensity)) / 100
+    if (intensity < 0.02) return
 
     // 1) Mask cứng (môi trên + dưới, khoét miệng)
     this.lipMaskCtx.clearRect(0, 0, w, h)
@@ -312,35 +322,93 @@ export class BeautyEngine {
     this.lipMaskCtx.fill()
     this.lipMaskCtx.globalCompositeOperation = 'source-over'
 
-    // 2) Thu nhỏ nhẹ rồi blur mạnh → viền mờ dần, không đắp cục
+    // 2) Viền mờ hơn (blur mạnh) — cloud / blurred lip trend
     this.lipMaskCtx.save()
     this.lipMaskCtx.globalCompositeOperation = 'destination-in'
-    this.lipMaskCtx.filter = 'blur(2px)'
+    this.lipMaskCtx.filter = 'blur(3px)'
     this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
     this.lipMaskCtx.filter = 'none'
     this.lipMaskCtx.restore()
 
-    this.lipMaskCtx.filter = 'blur(4.5px)'
+    this.lipMaskCtx.filter = 'blur(6.5px)'
     this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
     this.lipMaskCtx.filter = 'none'
 
-    // 3) Tint mềm: soft-light + alpha thấp (giữ texture môi thật)
+    // 3) Tint theo màu + độ đậm
+    const softA = 0.55 + intensity * 0.4
+    const overlayA = 0.08 + intensity * 0.22
     this.lipTintCtx.clearRect(0, 0, w, h)
     this.lipTintCtx.drawImage(this.canvas, 0, 0)
     this.lipTintCtx.globalCompositeOperation = 'soft-light'
-    this.lipTintCtx.fillStyle = 'rgba(190, 55, 75, 0.85)'
+    this.lipTintCtx.fillStyle = `rgba(${r},${g},${b},${softA})`
     this.lipTintCtx.fillRect(0, 0, w, h)
     this.lipTintCtx.globalCompositeOperation = 'source-atop'
-    this.lipTintCtx.fillStyle = 'rgba(200, 70, 90, 0.18)'
+    this.lipTintCtx.fillStyle = `rgba(${r},${g},${b},${overlayA})`
     this.lipTintCtx.fillRect(0, 0, w, h)
     this.lipTintCtx.globalCompositeOperation = 'destination-in'
     this.lipTintCtx.drawImage(this.lipMask, 0, 0)
     this.lipTintCtx.globalCompositeOperation = 'source-over'
 
-    // 4) Phủ nhẹ lên frame — không đậm đặc
-    this.ctx.globalAlpha = 0.42
+    this.ctx.globalAlpha = 0.28 + intensity * 0.4
     this.ctx.drawImage(this.lipTint, 0, 0)
     this.ctx.globalAlpha = 1
+
+    // 4) Bóng môi dưới (glassy pout)
+    if (this.lip.gloss) this.drawLowerLipGloss(landmarks)
+  }
+
+  private drawLowerLipGloss(landmarks: Array<{ x: number; y: number }>) {
+    const w = this.canvas.width
+    const h = this.canvas.height
+    // Điểm giữa môi dưới: 17 (bottom) + 14 (inner) — highlight dải ngang
+    const mid = landmarks[17]
+    const left = landmarks[84]
+    const right = landmarks[314]
+    const inner = landmarks[14]
+    if (!mid || !left || !right || !inner) return
+
+    const cx = ((left.x + right.x) / 2) * w
+    const cy = ((mid.y + inner.y) / 2) * h
+    const rx = Math.abs(right.x - left.x) * w * 0.28
+    const ry = Math.max(2, Math.abs(mid.y - inner.y) * h * 0.35)
+
+    this.lipTintCtx.clearRect(0, 0, w, h)
+    const grad = this.lipTintCtx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry))
+    grad.addColorStop(0, 'rgba(255,255,255,0.55)')
+    grad.addColorStop(0.45, 'rgba(255,255,255,0.22)')
+    grad.addColorStop(1, 'rgba(255,255,255,0)')
+    this.lipTintCtx.fillStyle = grad
+    this.lipTintCtx.beginPath()
+    this.lipTintCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+    this.lipTintCtx.fill()
+    this.lipTintCtx.filter = 'blur(3px)'
+    this.lipTintCtx.drawImage(this.lipTint, 0, 0)
+    this.lipTintCtx.filter = 'none'
+
+    // Chỉ trong vùng môi dưới
+    this.lipMaskCtx.clearRect(0, 0, w, h)
+    this.lipMaskCtx.fillStyle = '#fff'
+    this.lipMaskCtx.beginPath()
+    pathFrom(this.lipMaskCtx, landmarks, LOWER_OUTER, w, h)
+    this.lipMaskCtx.fill()
+    this.lipMaskCtx.globalCompositeOperation = 'destination-out'
+    this.lipMaskCtx.beginPath()
+    pathFrom(this.lipMaskCtx, landmarks, LOWER_INNER, w, h)
+    this.lipMaskCtx.fill()
+    this.lipMaskCtx.globalCompositeOperation = 'source-over'
+    this.lipMaskCtx.filter = 'blur(5px)'
+    this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
+    this.lipMaskCtx.filter = 'none'
+
+    this.lipTintCtx.globalCompositeOperation = 'destination-in'
+    this.lipTintCtx.drawImage(this.lipMask, 0, 0)
+    this.lipTintCtx.globalCompositeOperation = 'source-over'
+
+    this.ctx.globalCompositeOperation = 'soft-light'
+    this.ctx.globalAlpha = 0.55
+    this.ctx.drawImage(this.lipTint, 0, 0)
+    this.ctx.globalAlpha = 1
+    this.ctx.globalCompositeOperation = 'source-over'
   }
 
   async stop() {

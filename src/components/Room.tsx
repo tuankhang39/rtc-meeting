@@ -556,6 +556,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           <BeautyPanel
             presetId={beauty.presetId}
             onSelect={beauty.setPresetId}
+            lip={beauty.lip}
+            onLipChange={beauty.setLipOptions}
             onClose={() => setShowBeauty(false)}
           />
         )}

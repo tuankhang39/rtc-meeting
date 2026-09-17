@@ -1407,7 +1407,9 @@
   bottom: calc(100% + 10px);
   left: 50%;
   transform: translateX(-50%);
-  width: min(92vw, 340px);
+  width: min(92vw, 360px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
   padding: 12px 14px;
   border-radius: var(--radius);
   border: 1px solid rgba(200, 150, 170, 0.35);
@@ -1510,6 +1512,99 @@
   justify-content: flex-end;
 }
 
+.beauty-lips {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(200, 150, 170, 0.25);
+}
+
+.beauty-lips-head {
+  display: grid;
+  gap: 2px;
+}
+
+.beauty-lips-head strong {
+  font-size: 0.8rem;
+  color: var(--accent-deep);
+}
+
+.beauty-lips-head .muted {
+  font-size: 0.68rem;
+}
+
+.beauty-lip-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.beauty-lip-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+}
+
+.beauty-lip-swatch.active {
+  box-shadow: 0 0 0 2px var(--accent-deep, #c07a96);
+}
+
+.beauty-lip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.beauty-lip-row input[type='color'] {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(200, 150, 170, 0.35);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.beauty-lip-hex {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(200, 150, 170, 0.35);
+  background: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.beauty-lip-slider input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.beauty-lip-slider em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.4em;
+  text-align: right;
+  color: var(--muted, #888);
+  font-weight: 500;
+}
+
+.beauty-lip-check {
+  font-weight: 500;
+}
+
+.beauty-lip-check input {
+  accent-color: var(--accent-deep, #c07a96);
+}
+
 [data-theme='dark'] .beauty-panel {
   background: rgba(22, 26, 32, 0.96);
   border-color: rgba(148, 163, 184, 0.25);
@@ -1518,6 +1613,16 @@
 [data-theme='dark'] .beauty-preset-btn {
   background: rgba(30, 36, 44, 0.95);
   border-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .beauty-lips {
+  border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+[data-theme='dark'] .beauty-lip-hex {
+  background: rgba(30, 36, 44, 0.95);
+  border-color: rgba(148, 163, 184, 0.25);
   color: #e2e8f0;
 }
 
