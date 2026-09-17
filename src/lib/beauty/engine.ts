@@ -77,7 +77,7 @@ export class BeautyEngine {
   private frame = 0
   private running = false
   private face: FaceLandmarker | null = null
-  private lastLips: Array<{ x: number; y: number }> | null = null
+  private smoothLips: Array<{ x: number; y: number }> | null = null
   private onStatus: ((s: BeautyEngineStatus, err?: string) => void) | null = null
   private onTrack: ((t: MediaStreamTrack | null) => void) | null = null
 
@@ -202,18 +202,34 @@ export class BeautyEngine {
 
     this.smoothSkinOnly()
 
-    // Detect môi mỗi 3 frame — giữ landmark cũ giữa các frame (không giật)
-    if (this.face && this.frame % 3 === 0) {
+    // Detect môi mỗi frame — khớp miệng, không lệch chỗ
+    if (this.face) {
       try {
         const res = this.face.detectForVideo(this.video, performance.now())
         const lm = res.faceLandmarks?.[0]
-        if (lm?.length) this.lastLips = lm
+        if (lm?.length) this.updateSmoothLips(lm)
       } catch {
-        /* giữ landmark cũ */
+        /* giữ landmark mượt trước đó */
       }
     }
 
-    if (this.lastLips) this.drawLipsFromLandmarks(this.lastLips)
+    if (this.smoothLips) this.drawLipsFromLandmarks(this.smoothLips)
+  }
+
+  /** Lerp landmark để môi bám miệng mượt, không giật / không lệch frame */
+  private updateSmoothLips(next: Array<{ x: number; y: number }>) {
+    if (!this.smoothLips || this.smoothLips.length !== next.length) {
+      this.smoothLips = next.map((p) => ({ x: p.x, y: p.y }))
+      return
+    }
+    // 0.55 theo frame mới → bám miệng nhanh, vẫn mềm
+    const a = 0.55
+    for (let i = 0; i < next.length; i++) {
+      const p = next[i]!
+      const s = this.smoothLips[i]!
+      s.x = s.x * (1 - a) + p.x * a
+      s.y = s.y * (1 - a) + p.y * a
+    }
   }
 
   private isSkin(r: number, g: number, b: number) {
@@ -278,7 +294,7 @@ export class BeautyEngine {
     const w = this.canvas.width
     const h = this.canvas.height
 
-    // Mask môi (khoét miệng)
+    // 1) Mask cứng (môi trên + dưới, khoét miệng)
     this.lipMaskCtx.clearRect(0, 0, w, h)
     this.lipMaskCtx.fillStyle = '#fff'
     this.lipMaskCtx.beginPath()
@@ -295,25 +311,34 @@ export class BeautyEngine {
     pathFrom(this.lipMaskCtx, landmarks, LOWER_INNER, w, h)
     this.lipMaskCtx.fill()
     this.lipMaskCtx.globalCompositeOperation = 'source-over'
-    // Mép mềm
-    this.lipMaskCtx.filter = 'blur(1.5px)'
+
+    // 2) Thu nhỏ nhẹ rồi blur mạnh → viền mờ dần, không đắp cục
+    this.lipMaskCtx.save()
+    this.lipMaskCtx.globalCompositeOperation = 'destination-in'
+    this.lipMaskCtx.filter = 'blur(2px)'
+    this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
+    this.lipMaskCtx.filter = 'none'
+    this.lipMaskCtx.restore()
+
+    this.lipMaskCtx.filter = 'blur(4.5px)'
     this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
     this.lipMaskCtx.filter = 'none'
 
-    // Tint đỏ tự nhiên: multiply lên da môi thật
+    // 3) Tint mềm: soft-light + alpha thấp (giữ texture môi thật)
     this.lipTintCtx.clearRect(0, 0, w, h)
     this.lipTintCtx.drawImage(this.canvas, 0, 0)
-    this.lipTintCtx.globalCompositeOperation = 'multiply'
-    this.lipTintCtx.fillStyle = '#c43b55'
+    this.lipTintCtx.globalCompositeOperation = 'soft-light'
+    this.lipTintCtx.fillStyle = 'rgba(190, 55, 75, 0.85)'
     this.lipTintCtx.fillRect(0, 0, w, h)
     this.lipTintCtx.globalCompositeOperation = 'source-atop'
-    this.lipTintCtx.fillStyle = 'rgba(196, 59, 85, 0.28)'
+    this.lipTintCtx.fillStyle = 'rgba(200, 70, 90, 0.18)'
     this.lipTintCtx.fillRect(0, 0, w, h)
     this.lipTintCtx.globalCompositeOperation = 'destination-in'
     this.lipTintCtx.drawImage(this.lipMask, 0, 0)
     this.lipTintCtx.globalCompositeOperation = 'source-over'
 
-    this.ctx.globalAlpha = 0.55
+    // 4) Phủ nhẹ lên frame — không đậm đặc
+    this.ctx.globalAlpha = 0.42
     this.ctx.drawImage(this.lipTint, 0, 0)
     this.ctx.globalAlpha = 1
   }
@@ -327,7 +352,7 @@ export class BeautyEngine {
     this.out = null
     this.outTrack = null
     this.video.srcObject = null
-    this.lastLips = null
+    this.smoothLips = null
     // Giữ face singleton cache — không close (reuse lần sau)
     this.face = null
     this.onTrack?.(null)
