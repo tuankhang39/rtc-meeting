@@ -1,6 +1,7 @@
 import { filterActive, getFilterPreset, type FilterPresetId } from './presets'
 import { DEFAULT_LIP, hexToRgb, type LipOptions } from './lipColors'
 import { DEFAULT_SKIN, type SkinOptions } from './skin'
+import { DEFAULT_BROW, type BrowOptions } from './brows'
 
 export type BeautyEngineStatus = 'idle' | 'loading' | 'running' | 'error'
 
@@ -21,6 +22,12 @@ const FACE_OVAL = [
 ]
 const LEFT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
 const RIGHT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+
+/** Chân mày: upper outer→inner + lower outer→inner */
+const RIGHT_BROW_UPPER = [46, 53, 52, 65, 55]
+const RIGHT_BROW_LOWER = [70, 63, 105, 66, 107]
+const LEFT_BROW_UPPER = [276, 283, 282, 295, 285]
+const LEFT_BROW_LOWER = [300, 293, 334, 296, 336]
 
 type FaceLandmarker = {
   detectForVideo: (
@@ -65,10 +72,48 @@ function pathFrom(
   ctx.closePath()
 }
 
+/** Polygon chân mày có giãn dày theo pháp tuyến gần đúng */
+function browExpandedPath(
+  ctx: CanvasRenderingContext2D,
+  landmarks: Array<{ x: number; y: number }>,
+  upper: number[],
+  lower: number[],
+  w: number,
+  h: number,
+  expandPx: number,
+) {
+  const up = upper
+    .map((i) => landmarks[i])
+    .filter(Boolean)
+    .map((p) => ({ x: p!.x * w, y: p!.y * h }))
+  const lo = lower
+    .map((i) => landmarks[i])
+    .filter(Boolean)
+    .map((p) => ({ x: p!.x * w, y: p!.y * h }))
+  if (up.length < 2 || lo.length < 2) return
+
+  const midY = (up.reduce((s, p) => s + p.y, 0) / up.length + lo.reduce((s, p) => s + p.y, 0) / lo.length) / 2
+  const expandUp = up.map((p) => ({
+    x: p.x,
+    y: p.y - expandPx * (p.y <= midY + 2 ? 1 : 0.35),
+  }))
+  const expandLo = lo.map((p) => ({
+    x: p.x,
+    y: p.y + expandPx * (p.y >= midY - 2 ? 1 : 0.35),
+  }))
+
+  ctx.beginPath()
+  expandUp.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
+  for (let i = expandLo.length - 1; i >= 0; i--) {
+    const p = expandLo[i]!
+    ctx.lineTo(p.x, p.y)
+  }
+  ctx.closePath()
+}
+
 /**
  * Filter nhẹ.
- * - Mịn / sáng da: Face Landmarker oval (model đã load cho môi — không thêm model)
- * - Môi: cùng landmark, lazy-load
+ * - Mịn / sáng / môi / chân mày: cùng Face Landmarker (không thêm model)
  */
 export class BeautyEngine {
   private video = document.createElement('video')
@@ -87,11 +132,13 @@ export class BeautyEngine {
   private presetId: FilterPresetId = 'none'
   private lip: LipOptions = { ...DEFAULT_LIP }
   private skin: SkinOptions = { ...DEFAULT_SKIN }
+  private brow: BrowOptions = { ...DEFAULT_BROW }
   private raf = 0
   private frame = 0
   private running = false
   private face: FaceLandmarker | null = null
   private smoothLips: Array<{ x: number; y: number }> | null = null
+  private landmarkTarget: Array<{ x: number; y: number }> | null = null
   private onStatus: ((s: BeautyEngineStatus, err?: string) => void) | null = null
   private onTrack: ((t: MediaStreamTrack | null) => void) | null = null
 
@@ -99,10 +146,12 @@ export class BeautyEngine {
     presetId: FilterPresetId = 'none',
     lip: LipOptions = DEFAULT_LIP,
     skin: SkinOptions = DEFAULT_SKIN,
+    brow: BrowOptions = DEFAULT_BROW,
   ) {
     this.presetId = presetId
     this.lip = { ...lip }
     this.skin = { ...skin }
+    this.brow = { ...brow }
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })
     const workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true })
     const faceMaskCtx = this.faceMask.getContext('2d')
@@ -149,6 +198,10 @@ export class BeautyEngine {
     this.skin = { ...skin }
   }
 
+  setBrowOptions(brow: BrowOptions) {
+    this.brow = { ...brow }
+  }
+
   async start(source: MediaStreamTrack): Promise<MediaStreamTrack> {
     await this.stop()
     if (!filterActive(this.presetId)) throw new Error('Chưa chọn filter')
@@ -177,7 +230,9 @@ export class BeautyEngine {
       }
     }
 
-    const fps = Math.min(24, Math.max(15, Math.round(settings.frameRate || 24)))
+    // Beauty nặng hơn → 18fps; CSS filter giữ cao hơn
+    const wantFps = preset.mode === 'beauty' ? 18 : 24
+    const fps = Math.min(wantFps, Math.max(15, Math.round(settings.frameRate || wantFps)))
     this.out = this.canvas.captureStream(fps)
     this.outTrack = this.out.getVideoTracks()[0] ?? null
     if (!this.outTrack) throw new Error('Không tạo được track filter')
@@ -198,8 +253,8 @@ export class BeautyEngine {
     this.lipMask.height = h
     this.lipTint.width = w
     this.lipTint.height = h
-    this.workCanvas.width = Math.max(160, Math.round(w / 2.5))
-    this.workCanvas.height = Math.max(90, Math.round(h / 2.5))
+    this.workCanvas.width = Math.max(120, Math.round(w / 3.2))
+    this.workCanvas.height = Math.max(68, Math.round(h / 3.2))
   }
 
   private loop = () => {
@@ -230,44 +285,64 @@ export class BeautyEngine {
     const w = this.canvas.width
     const h = this.canvas.height
 
-    // Frame gốc — sáng/mịn chỉ trong mask mặt (không đụng nền)
     this.ctx.filter = 'none'
     this.ctx.drawImage(this.video, 0, 0, w, h)
 
-    if (this.face) {
+    // Detect mỗi 2 frame; frame còn lại lerp bám landmark
+    if (this.face && this.frame % 2 === 0) {
       try {
         const res = this.face.detectForVideo(this.video, performance.now())
         const lm = res.faceLandmarks?.[0]
-        if (lm?.length) this.updateSmoothLips(lm)
+        if (lm?.length) this.setLandmarkTarget(lm)
       } catch {
-        /* giữ landmark mượt trước đó */
+        /* giữ target trước */
       }
     }
+    this.coastLandmarks()
 
     if (this.smoothLips) {
-      this.buildFaceMask(this.smoothLips)
+      const needFaceFx =
+        this.skin.brighten >= 2 || this.skin.smooth >= 2
+      if (needFaceFx) this.buildFaceMask(this.smoothLips)
       this.brightenFace()
-      this.smoothFaceSkin()
+      // Pixel smooth (nặng) mỗi 2 frame; frame xen kẽ dùng blur nhẹ trong mask
+      if (this.frame % 2 === 0) this.smoothFaceSkin()
+      else this.softSmoothFace()
+      this.drawBrowsFromLandmarks(this.smoothLips)
       this.drawLipsFromLandmarks(this.smoothLips)
       return
     }
 
-    // Fallback khi chưa có face: mịn nhẹ theo màu da
     this.smoothSkinFallback()
   }
 
-  /** Lerp landmark để môi / mặt bám mượt */
-  private updateSmoothLips(next: Array<{ x: number; y: number }>) {
-    if (!this.smoothLips || this.smoothLips.length !== next.length) {
+  private setLandmarkTarget(next: Array<{ x: number; y: number }>) {
+    if (!this.landmarkTarget || this.landmarkTarget.length !== next.length) {
+      this.landmarkTarget = next.map((p) => ({ x: p.x, y: p.y }))
       this.smoothLips = next.map((p) => ({ x: p.x, y: p.y }))
       return
     }
-    const a = 0.55
     for (let i = 0; i < next.length; i++) {
       const p = next[i]!
+      const t = this.landmarkTarget[i]!
+      t.x = p.x
+      t.y = p.y
+    }
+  }
+
+  /** Mỗi frame tiến dần về landmark mới — tránh lệch khi detect cách frame */
+  private coastLandmarks() {
+    if (!this.landmarkTarget || !this.smoothLips) return
+    if (this.smoothLips.length !== this.landmarkTarget.length) {
+      this.smoothLips = this.landmarkTarget.map((p) => ({ x: p.x, y: p.y }))
+      return
+    }
+    const a = 0.58
+    for (let i = 0; i < this.landmarkTarget.length; i++) {
+      const t = this.landmarkTarget[i]!
       const s = this.smoothLips[i]!
-      s.x = s.x * (1 - a) + p.x * a
-      s.y = s.y * (1 - a) + p.y * a
+      s.x = s.x * (1 - a) + t.x * a
+      s.y = s.y * (1 - a) + t.y * a
     }
   }
 
@@ -280,7 +355,6 @@ export class BeautyEngine {
     pathFrom(this.faceMaskCtx, landmarks, FACE_OVAL, w, h)
     this.faceMaskCtx.fill()
 
-    // Khoét mắt — giữ nét mắt
     this.faceMaskCtx.globalCompositeOperation = 'destination-out'
     this.faceMaskCtx.beginPath()
     pathFrom(this.faceMaskCtx, landmarks, LEFT_EYE, w, h)
@@ -290,8 +364,7 @@ export class BeautyEngine {
     this.faceMaskCtx.fill()
     this.faceMaskCtx.globalCompositeOperation = 'source-over'
 
-    // Viền mặt mềm
-    this.faceMaskCtx.filter = 'blur(10px)'
+    this.faceMaskCtx.filter = 'blur(8px)'
     this.faceMaskCtx.drawImage(this.faceMask, 0, 0)
     this.faceMaskCtx.filter = 'none'
   }
@@ -328,6 +401,27 @@ export class BeautyEngine {
     if (rb < 12 || rb > 95) return false
     if (rg > 28 && r > 150) return false
     return true
+  }
+
+  /** Mịn nhẹ bằng blur trong mask — rẻ hơn getImageData */
+  private softSmoothFace() {
+    const smooth = Math.max(0, Math.min(100, this.skin.smooth)) / 100
+    if (smooth < 0.02) return
+
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const blur = 1.2 + smooth * 2.2
+    this.lipTintCtx.clearRect(0, 0, w, h)
+    this.lipTintCtx.filter = `blur(${blur.toFixed(1)}px)`
+    this.lipTintCtx.drawImage(this.canvas, 0, 0)
+    this.lipTintCtx.filter = 'none'
+    this.lipTintCtx.globalCompositeOperation = 'destination-in'
+    this.lipTintCtx.drawImage(this.faceMask, 0, 0)
+    this.lipTintCtx.globalCompositeOperation = 'source-over'
+
+    this.ctx.globalAlpha = 0.22 + smooth * 0.28
+    this.ctx.drawImage(this.lipTint, 0, 0)
+    this.ctx.globalAlpha = 1
   }
 
   /** Mịn trong oval mặt + chỉ pixel da (không đụng tóc / nền) */
@@ -441,6 +535,106 @@ export class BeautyEngine {
     this.ctx.globalAlpha = 0.35 + smooth * 0.35
     this.ctx.drawImage(this.workCanvas, 0, 0, this.canvas.width, this.canvas.height)
     this.ctx.globalAlpha = 1
+  }
+
+  private drawBrowsFromLandmarks(landmarks: Array<{ x: number; y: number }>) {
+    const intensity = Math.max(0, Math.min(100, this.brow.intensity)) / 100
+    if (intensity < 0.02) return
+
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const thick = Math.max(0, Math.min(100, this.brow.thickness)) / 100
+    // Độ dày theo khoảng cách mắt–mày
+    const eyeRef = landmarks[159] && landmarks[70]
+      ? Math.abs((landmarks[70].y - landmarks[159].y) * h)
+      : h * 0.03
+    const expandPx = 0.5 + thick * Math.max(2.5, eyeRef * 0.55)
+
+    const style = this.brow.style
+    const blurPx = style === 'soft' ? 7 : style === 'defined' ? 2.2 : 4.5
+    const softA = style === 'defined' ? 0.5 + intensity * 0.45 : 0.35 + intensity * 0.4
+    const mulA = style === 'soft' ? 0.06 + intensity * 0.14 : 0.1 + intensity * 0.22
+    // Nâu ấm tự nhiên
+    const r = style === 'defined' ? 48 : 58
+    const g = style === 'defined' ? 32 : 40
+    const b = style === 'defined' ? 24 : 30
+
+    this.lipMaskCtx.clearRect(0, 0, w, h)
+    this.lipMaskCtx.fillStyle = '#fff'
+    browExpandedPath(
+      this.lipMaskCtx,
+      landmarks,
+      RIGHT_BROW_UPPER,
+      RIGHT_BROW_LOWER,
+      w,
+      h,
+      expandPx,
+    )
+    this.lipMaskCtx.fill()
+    browExpandedPath(
+      this.lipMaskCtx,
+      landmarks,
+      LEFT_BROW_UPPER,
+      LEFT_BROW_LOWER,
+      w,
+      h,
+      expandPx,
+    )
+    this.lipMaskCtx.fill()
+
+    // Làm mềm viền — kiểu chân mày tự nhiên, không khối cứng
+    this.lipMaskCtx.filter = `blur(${blurPx}px)`
+    this.lipMaskCtx.drawImage(this.lipMask, 0, 0)
+    this.lipMaskCtx.filter = 'none'
+
+    this.lipTintCtx.clearRect(0, 0, w, h)
+    this.lipTintCtx.drawImage(this.canvas, 0, 0)
+    this.lipTintCtx.globalCompositeOperation = 'multiply'
+    this.lipTintCtx.fillStyle = `rgba(${r},${g},${b},${mulA})`
+    this.lipTintCtx.fillRect(0, 0, w, h)
+    this.lipTintCtx.globalCompositeOperation = 'soft-light'
+    this.lipTintCtx.fillStyle = `rgba(${r + 20},${g + 12},${b + 8},${softA})`
+    this.lipTintCtx.fillRect(0, 0, w, h)
+    this.lipTintCtx.globalCompositeOperation = 'destination-in'
+    this.lipTintCtx.drawImage(this.lipMask, 0, 0)
+    this.lipTintCtx.globalCompositeOperation = 'source-over'
+
+    this.ctx.globalAlpha = 0.32 + intensity * 0.48
+    this.ctx.drawImage(this.lipTint, 0, 0)
+    this.ctx.globalAlpha = 1
+
+    // Vạch nhẹ theo cung để không bị “đắp khối”
+    if (style !== 'soft') {
+      this.drawBrowHairHints(landmarks, intensity, style === 'defined' ? 0.22 : 0.14)
+    }
+  }
+
+  private drawBrowHairHints(
+    landmarks: Array<{ x: number; y: number }>,
+    intensity: number,
+    alpha: number,
+  ) {
+    const w = this.canvas.width
+    const h = this.canvas.height
+    const arches = [RIGHT_BROW_UPPER, LEFT_BROW_UPPER]
+    this.ctx.save()
+    this.ctx.strokeStyle = `rgba(55, 36, 26, ${alpha * intensity})`
+    this.ctx.lineWidth = Math.max(0.8, w * 0.0018)
+    this.ctx.lineCap = 'round'
+    this.ctx.lineJoin = 'round'
+    for (const arch of arches) {
+      this.ctx.beginPath()
+      arch.forEach((idx, i) => {
+        const p = landmarks[idx]
+        if (!p) return
+        const x = p.x * w
+        const y = p.y * h
+        if (i === 0) this.ctx.moveTo(x, y)
+        else this.ctx.lineTo(x, y)
+      })
+      this.ctx.stroke()
+    }
+    this.ctx.restore()
   }
 
   private drawLipsFromLandmarks(landmarks: Array<{ x: number; y: number }>) {
@@ -567,6 +761,7 @@ export class BeautyEngine {
     this.outTrack = null
     this.video.srcObject = null
     this.smoothLips = null
+    this.landmarkTarget = null
     // Giữ face singleton cache — không close (reuse lần sau)
     this.face = null
     this.onTrack?.(null)

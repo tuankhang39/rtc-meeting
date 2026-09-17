@@ -1,5 +1,6 @@
 import { FILTER_PRESETS, type FilterPresetId } from '../lib/beauty/presets'
 import { TRENDING_LIP_COLORS, type LipOptions } from '../lib/beauty/lipColors'
+import { BROW_STYLES, type BrowOptions } from '../lib/beauty/brows'
 import type { SkinOptions } from '../lib/beauty/skin'
 
 type Props = {
@@ -9,6 +10,8 @@ type Props = {
   onLipChange: (patch: Partial<LipOptions>) => void
   skin: SkinOptions
   onSkinChange: (patch: Partial<SkinOptions>) => void
+  brow: BrowOptions
+  onBrowChange: (patch: Partial<BrowOptions>) => void
   onClose: () => void
 }
 
@@ -19,6 +22,8 @@ export function BeautyPanel({
   onLipChange,
   skin,
   onSkinChange,
+  brow,
+  onBrowChange,
   onClose,
 }: Props) {
   const showBeauty = presetId === 'natural'
@@ -32,7 +37,7 @@ export function BeautyPanel({
         </button>
       </div>
 
-      <p className="beauty-hint muted">Chọn hiệu ứng. Với Tự nhiên có thể chỉnh da và môi.</p>
+      <p className="beauty-hint muted">Chọn hiệu ứng. Với Tự nhiên có thể chỉnh da, chân mày và môi.</p>
 
       <div className="beauty-presets">
         {FILTER_PRESETS.map((p) => (
@@ -80,6 +85,52 @@ export function BeautyPanel({
                 aria-valuetext={`${skin.brighten}%`}
               />
               <em>{skin.brighten}%</em>
+            </label>
+          </div>
+
+          <div className="beauty-brows">
+            <div className="beauty-lips-head">
+              <strong>Chân mày</strong>
+              <span className="muted">Theo khuôn mặt · kéo đậm về 0 để tắt</span>
+            </div>
+
+            <div className="beauty-brow-styles" role="group" aria-label="Kiểu chân mày">
+              {BROW_STYLES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`beauty-brow-style${brow.style === s.id ? ' active' : ''}`}
+                  onClick={() => onBrowChange({ style: s.id })}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            <label className="beauty-lip-row beauty-lip-slider">
+              <span>Đậm</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={brow.intensity}
+                onChange={(e) => onBrowChange({ intensity: Number(e.target.value) })}
+                aria-valuetext={`${brow.intensity}%`}
+              />
+              <em>{brow.intensity}%</em>
+            </label>
+
+            <label className="beauty-lip-row beauty-lip-slider">
+              <span>Dày</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={brow.thickness}
+                onChange={(e) => onBrowChange({ thickness: Number(e.target.value) })}
+                aria-valuetext={`${brow.thickness}%`}
+              />
+              <em>{brow.thickness}%</em>
             </label>
           </div>
 

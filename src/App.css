@@ -1526,6 +1526,36 @@
   border-top: 1px solid rgba(200, 150, 170, 0.25);
 }
 
+.beauty-brows {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(200, 150, 170, 0.25);
+}
+
+.beauty-brow-styles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.beauty-brow-style {
+  padding: 6px 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(200, 150, 170, 0.28);
+  background: #fff;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.beauty-brow-style.active {
+  border-color: var(--accent-deep, #c07a96);
+  box-shadow: 0 0 0 2px rgba(192, 122, 150, 0.28);
+  color: var(--accent-deep);
+}
+
 .beauty-lips-head {
   display: grid;
   gap: 2px;
@@ -1629,6 +1659,16 @@
 
 [data-theme='dark'] .beauty-skin {
   border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+[data-theme='dark'] .beauty-brows {
+  border-top-color: rgba(148, 163, 184, 0.2);
+}
+
+[data-theme='dark'] .beauty-brow-style {
+  background: rgba(30, 36, 44, 0.95);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
 }
 
 [data-theme='dark'] .beauty-lip-hex {
