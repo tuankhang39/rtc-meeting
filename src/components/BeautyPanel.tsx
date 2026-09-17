@@ -16,7 +16,9 @@ export function BeautyPanel({ presetId, onSelect, onClose }: Props) {
         </button>
       </div>
 
-      <p className="beauty-hint muted">Chọn 1 kiểu — nhẹ, chỉ máy bạn xử lý.</p>
+      <p className="beauty-hint muted">
+        Tự nhiên: mịn da nhẹ + môi theo Face Landmarker (lần đầu tải model nhỏ).
+      </p>
 
       <div className="beauty-presets">
         {FILTER_PRESETS.map((p) => (
