@@ -49,7 +49,7 @@ export function BeautyPanel({ settings, status, error, onChange, onReset, onClos
       </div>
 
       <p className="beauty-hint muted">
-        Chỉ chạy trên máy bạn. Son / mờ nền lần đầu sẽ tải model AI (~vài MB).
+        Chỉ chạy trên máy bạn. Son/mịn/trắng: OpenMakeup · Mờ nền: Segmo (lần đầu tải model).
       </p>
 
       {status === 'loading' && <p className="beauty-status">Đang tải model…</p>}

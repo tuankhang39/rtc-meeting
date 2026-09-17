@@ -52,4 +52,7 @@ function turnDevApi(): Plugin {
 
 export default defineConfig({
   plugins: [react(), turnDevApi()],
+  optimizeDeps: {
+    include: ['segmo', 'open-makeup-sdk', 'three'],
+  },
 })

@@ -972,11 +972,23 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     const video = camOnRef.current
       ? (beautyTrackRef.current ?? cameraTrackRef.current)
       : null
-    setLocalStream(new MediaStream(video ? [...audio, video] : [...audio]))
+
+    setLocalStream((prev) => {
+      const prevVideo = prev?.getVideoTracks()[0] ?? null
+      const prevAudio = prev?.getAudioTracks()[0] ?? null
+      const nextAudio = audio[0] ?? null
+      if (prevVideo === video && prevAudio === nextAudio && prev) return prev
+      return new MediaStream(video ? [...audio, video] : [...audio])
+    })
   }, [])
 
   const setBeautyTrack = useCallback(
     (track: MediaStreamTrack | null) => {
+      if (beautyTrackRef.current === track) {
+        // Cùng track — chỉ sync settings đã đổi sẵn trong engine, không đập lại preview
+        if (track) meshRef.current?.syncLocalTracks()
+        return
+      }
       beautyTrackRef.current = track
       meshRef.current?.syncLocalTracks()
       refreshLocalPreview()
