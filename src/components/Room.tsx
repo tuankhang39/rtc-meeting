@@ -629,14 +629,14 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 setShowQuickComments(false)
                 setShowStars(false)
               }}
-              title="Filter camera"
-              aria-label="Filter"
+              title="Làm đẹp camera"
+              aria-label="Làm đẹp"
               disabled={!camOn}
             >
               <span className="react-face" aria-hidden>
                 ✨
               </span>
-              <span>Filter</span>
+              <span>Làm đẹp</span>
             </button>
             <button
               type="button"

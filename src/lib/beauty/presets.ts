@@ -31,7 +31,7 @@ export const FILTER_PRESETS: FilterPreset[] = [
   { id: 'cool', label: 'Mát', css: 'brightness(1.04) hue-rotate(12deg) saturate(1.05)' },
   { id: 'bright', label: 'Sáng', css: 'brightness(1.18) contrast(1.05) saturate(1.08)' },
   { id: 'vivid', label: 'Rực', css: 'brightness(1.06) contrast(1.12) saturate(1.45)' },
-  { id: 'vintage', label: 'Vintage', css: 'sepia(0.35) contrast(0.95) brightness(1.05)' },
+  { id: 'vintage', label: 'Cổ điển', css: 'sepia(0.35) contrast(0.95) brightness(1.05)' },
   { id: 'bw', label: 'Đen trắng', css: 'grayscale(1) contrast(1.08)' },
 ]
 

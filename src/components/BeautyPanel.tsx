@@ -24,17 +24,15 @@ export function BeautyPanel({
   const showBeauty = presetId === 'natural'
 
   return (
-    <div className="beauty-panel" role="dialog" aria-label="Filter camera">
+    <div className="beauty-panel" role="dialog" aria-label="Làm đẹp camera">
       <div className="beauty-panel-head">
-        <strong>Filter cam</strong>
+        <strong>Làm đẹp</strong>
         <button type="button" className="btn ghost beauty-close" onClick={onClose} aria-label="Đóng">
           ✕
         </button>
       </div>
 
-      <p className="beauty-hint muted">
-        Tự nhiên: mịn/sáng theo vùng mặt + màu môi (cùng Face Landmarker, không thêm model).
-      </p>
+      <p className="beauty-hint muted">Chọn hiệu ứng. Với Tự nhiên có thể chỉnh da và môi.</p>
 
       <div className="beauty-presets">
         {FILTER_PRESETS.map((p) => (
@@ -55,11 +53,11 @@ export function BeautyPanel({
           <div className="beauty-skin">
             <div className="beauty-lips-head">
               <strong>Da</strong>
-              <span className="muted">Mịn / sáng theo vùng mặt (Face Landmarker)</span>
+              <span className="muted">Chỉ áp dụng trên khuôn mặt</span>
             </div>
 
             <label className="beauty-lip-row beauty-lip-slider">
-              <span>Mịn da</span>
+              <span>Mịn</span>
               <input
                 type="range"
                 min={0}
@@ -72,7 +70,7 @@ export function BeautyPanel({
             </label>
 
             <label className="beauty-lip-row beauty-lip-slider">
-              <span>Sáng da</span>
+              <span>Sáng</span>
               <input
                 type="range"
                 min={0}
@@ -87,11 +85,11 @@ export function BeautyPanel({
 
           <div className="beauty-lips">
             <div className="beauty-lips-head">
-              <strong>Màu môi trending</strong>
-              <span className="muted">Đỏ · Cam · Hồng (12 màu)</span>
+              <strong>Son môi</strong>
+              <span className="muted">Gợi ý đang thịnh</span>
             </div>
 
-            <div className="beauty-lip-swatches" role="listbox" aria-label="Màu môi gợi ý">
+            <div className="beauty-lip-swatches" role="listbox" aria-label="Màu son gợi ý">
               {TRENDING_LIP_COLORS.map((s) => {
                 const active = lip.color.toLowerCase() === s.color.toLowerCase()
                 return (
@@ -100,7 +98,7 @@ export function BeautyPanel({
                     type="button"
                     role="option"
                     aria-selected={active}
-                    title={`${s.label}${s.hint ? ` — ${s.hint}` : ''}`}
+                    title={s.label}
                     className={`beauty-lip-swatch${active ? ' active' : ''}`}
                     style={{ background: s.color }}
                     onClick={() => onLipChange({ color: s.color })}
@@ -112,12 +110,12 @@ export function BeautyPanel({
             </div>
 
             <label className="beauty-lip-row">
-              <span>Custom</span>
+              <span>Tự chọn</span>
               <input
                 type="color"
                 value={lip.color.length === 7 ? lip.color : '#e04a32'}
                 onChange={(e) => onLipChange({ color: e.target.value })}
-                aria-label="Chọn màu môi tùy chỉnh"
+                aria-label="Chọn màu son"
               />
               <input
                 type="text"
@@ -130,12 +128,12 @@ export function BeautyPanel({
                   if (!v.startsWith('#')) v = `#${v}`
                   if (/^#[0-9a-fA-F]{0,6}$/.test(v)) onLipChange({ color: v })
                 }}
-                aria-label="Mã hex màu môi"
+                aria-label="Mã màu son"
               />
             </label>
 
             <label className="beauty-lip-row beauty-lip-slider">
-              <span>Đậm nhạt</span>
+              <span>Độ đậm</span>
               <input
                 type="range"
                 min={0}
@@ -153,7 +151,7 @@ export function BeautyPanel({
                 checked={lip.gloss}
                 onChange={(e) => onLipChange({ gloss: e.target.checked })}
               />
-              <span>Bóng môi dưới (gloss)</span>
+              <span>Bóng môi</span>
             </label>
           </div>
         </>
