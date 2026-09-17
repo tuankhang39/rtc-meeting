@@ -23,10 +23,13 @@ import { quickCommentAnnounce, type QuickComment } from '../lib/quickComments'
 import { playQuickCommentSound, unlockQuickAudio } from '../lib/quickAudio'
 import type { DrawStroke } from '../lib/draw'
 import type { ScreenSticker, StickerPackId } from '../lib/stickers'
+import type { ChatLesson, ChatMaterial, ChatNote, PinnedMessage } from '../lib/chatExtras'
+import { safeHref } from '../lib/chatLinks'
 import { MAX_PARTICIPANTS, createPeerConnection, randomId } from '../lib/webrtc'
 import { resolveIceServers } from '../lib/iceServers'
 import { PeerMesh, type SignalPayload, type TrackRole } from '../lib/peerMesh'
 import { markRoomEmptyIfNeeded, markRoomOccupied, sweepEmptyRooms } from '../lib/rooms'
+import { isHostLoggedIn } from '../lib/hostAuth'
 
 export type Participant = {
   name: string
@@ -133,6 +136,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const [remotes, setRemotes] = useState<RemotePeer[]>([])
   const [participants, setParticipants] = useState<Record<string, Participant>>({})
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [pinnedMessages, setPinnedMessages] = useState<PinnedMessage[]>([])
+  const [chatNotes, setChatNotes] = useState<ChatNote[]>([])
+  const [chatLessons, setChatLessons] = useState<ChatLesson[]>([])
+  const [chatMaterials, setChatMaterials] = useState<ChatMaterial[]>([])
   const [micOn, setMicOn] = useState(true)
   const [camOn, setCamOn] = useState(true)
   const [rawCameraTrack, setRawCameraTrack] = useState<MediaStreamTrack | null>(null)
@@ -670,6 +677,38 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         })
         cleanups.push(() => unsubChat())
 
+        const unsubPins = onValue(ref(db, `rooms/${roomId}/pins`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<PinnedMessage, 'id'>> | null) ?? {}
+          const list = Object.entries(val).map(([id, p]) => ({ id, ...p }))
+          list.sort((a, b) => b.createdAt - a.createdAt)
+          setPinnedMessages(list.slice(0, 40))
+        })
+        cleanups.push(() => unsubPins())
+
+        const unsubNotes = onValue(ref(db, `rooms/${roomId}/notes`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<ChatNote, 'id'>> | null) ?? {}
+          const list = Object.entries(val).map(([id, n]) => ({ id, ...n }))
+          list.sort((a, b) => b.createdAt - a.createdAt)
+          setChatNotes(list.slice(0, 60))
+        })
+        cleanups.push(() => unsubNotes())
+
+        const unsubLessons = onValue(ref(db, `rooms/${roomId}/lessons`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<ChatLesson, 'id'>> | null) ?? {}
+          const list = Object.entries(val).map(([id, n]) => ({ id, ...n }))
+          list.sort((a, b) => b.createdAt - a.createdAt)
+          setChatLessons(list.slice(0, 40))
+        })
+        cleanups.push(() => unsubLessons())
+
+        const unsubMaterials = onValue(ref(db, `rooms/${roomId}/materials`), (snap) => {
+          const val = (snap.val() as Record<string, Omit<ChatMaterial, 'id'>> | null) ?? {}
+          const list = Object.entries(val).map(([id, n]) => ({ id, ...n }))
+          list.sort((a, b) => b.createdAt - a.createdAt)
+          setChatMaterials(list.slice(0, 40))
+        })
+        cleanups.push(() => unsubMaterials())
+
         // Host mute commands
         const unsubMod = onChildAdded(ref(db, `rooms/${roomId}/moderation/${userId}`), async (snap) => {
           const cmd = snap.val() as { type?: string; byName?: string } | null
@@ -1027,6 +1066,115 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     [roomId, userId],
   )
 
+  const pinChatMessage = useCallback(
+    async (message: ChatMessage) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const existing = pinnedMessages.find((p) => p.messageId === message.id)
+      if (existing) return
+      await push(ref(getDb(), `rooms/${roomId}/pins`), {
+        messageId: message.id,
+        text: message.text,
+        authorId: message.userId,
+        authorName: message.name,
+        pinnedBy: userId,
+        pinnedByName: displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`,
+        createdAt: Date.now(),
+      })
+    },
+    [pinnedMessages, roomId, userId],
+  )
+
+  const unpinChatMessage = useCallback(
+    async (pinId: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const pin = pinnedMessages.find((p) => p.id === pinId)
+      if (!pin) return
+      await remove(ref(getDb(), `rooms/${roomId}/pins/${pinId}`))
+    },
+    [pinnedMessages, roomId, userId],
+  )
+
+  const addChatNote = useCallback(
+    async (tag: string, text: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const t = text.trim()
+      if (!t) return
+      await push(ref(getDb(), `rooms/${roomId}/notes`), {
+        tag: tag.trim().slice(0, 40) || 'Ghi chú',
+        text: t.slice(0, 500),
+        userId,
+        name: displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`,
+        createdAt: Date.now(),
+      })
+    },
+    [roomId, userId],
+  )
+
+  const removeChatNote = useCallback(
+    async (id: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const item = chatNotes.find((n) => n.id === id)
+      if (!item) return
+      await remove(ref(getDb(), `rooms/${roomId}/notes/${id}`))
+    },
+    [chatNotes, roomId, userId],
+  )
+
+  const addChatLesson = useCallback(
+    async (title: string, link: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const t = title.trim()
+      if (!t) return
+      const href = link.trim() ? safeHref(link.trim()) : ''
+      if (link.trim() && !href) return
+      await push(ref(getDb(), `rooms/${roomId}/lessons`), {
+        title: t.slice(0, 120),
+        link: href || '',
+        userId,
+        name: displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`,
+        createdAt: Date.now(),
+      })
+    },
+    [roomId, userId],
+  )
+
+  const removeChatLesson = useCallback(
+    async (id: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const item = chatLessons.find((n) => n.id === id)
+      if (!item) return
+      await remove(ref(getDb(), `rooms/${roomId}/lessons/${id}`))
+    },
+    [chatLessons, roomId, userId],
+  )
+
+  const addChatMaterial = useCallback(
+    async (label: string, link: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const l = label.trim()
+      const href = safeHref(link.trim())
+      if (!l || !href) return
+      await push(ref(getDb(), `rooms/${roomId}/materials`), {
+        label: l.slice(0, 80),
+        link: href,
+        userId,
+        name: displayNameRef.current.trim() || `User-${userId.slice(0, 4)}`,
+        createdAt: Date.now(),
+      })
+    },
+    [roomId, userId],
+  )
+
+  const removeChatMaterial = useCallback(
+    async (id: string) => {
+      if (!isHostRef.current || !isHostLoggedIn()) return
+      const item = chatMaterials.find((n) => n.id === id)
+      if (!item) return
+      await remove(ref(getDb(), `rooms/${roomId}/materials/${id}`))
+    },
+    [chatMaterials, roomId, userId],
+  )
+
   const sendReaction = useCallback(
     async (emoji: string) => {
       await push(ref(getDb(), `rooms/${roomId}/reactions`), {
@@ -1179,6 +1327,10 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     remotes,
     participants,
     messages,
+    pinnedMessages,
+    chatNotes,
+    chatLessons,
+    chatMaterials,
     micOn,
     camOn,
     status,
@@ -1205,6 +1357,14 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     toggleScreenShare,
     muteRemote,
     sendChat,
+    pinChatMessage,
+    unpinChatMessage,
+    addChatNote,
+    removeChatNote,
+    addChatLesson,
+    removeChatLesson,
+    addChatMaterial,
+    removeChatMaterial,
     sendReaction,
     sendPlayful,
     giveStar,

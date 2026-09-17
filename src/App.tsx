@@ -50,7 +50,7 @@ export default function App() {
   const isAdmin = path === '/admin' || path === '/dashboard'
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${session ? ' is-room' : ''}`}>
       <CuteStickers />
       <div className="app-content">
         {session ? (

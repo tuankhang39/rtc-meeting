@@ -1,18 +1,24 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BRAND_SHORT } from '../lib/brand'
 import { useRoom } from '../hooks/useRoom'
 import { MAX_PARTICIPANTS } from '../lib/webrtc'
 import {
+  IconBeauty,
   IconCam,
   IconCamOff,
   IconCopy,
+  IconEraser,
   IconLeave,
+  IconMegaphone,
   IconMic,
   IconMicOff,
+  IconPeople,
+  IconPlayful,
+  IconReact,
   IconRecord,
   IconScreen,
   IconScreenOff,
-  IconSend,
+  IconSticker,
 } from './Icons'
 import { ToastStack, useToasts } from './Toast'
 import { ReactionBar, ReactionBurst } from './Reactions'
@@ -24,6 +30,7 @@ import { ScreenStickerOverlay, StickerPackPicker } from './ScreenStickers'
 import { ThemeToggle } from './ThemeToggle'
 import { VideoTile } from './VideoTile'
 import { StarBoard } from './StarBoard'
+import { ChatPanel } from './ChatPanel'
 import { useTeachPip } from '../hooks/useTeachPip'
 import { useClassRecorder } from '../hooks/useClassRecorder'
 import { isHostLoggedIn } from '../lib/hostAuth'
@@ -45,6 +52,10 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     remotes,
     participants,
     messages,
+    pinnedMessages,
+    chatNotes,
+    chatLessons,
+    chatMaterials,
     micOn,
     camOn,
     status,
@@ -71,6 +82,14 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     toggleScreenShare,
     muteRemote,
     sendChat,
+    pinChatMessage,
+    unpinChatMessage,
+    addChatNote,
+    removeChatNote,
+    addChatLesson,
+    removeChatLesson,
+    addChatMaterial,
+    removeChatMaterial,
     sendReaction,
     sendPlayful,
     giveStar,
@@ -84,7 +103,6 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   } = useRoom({ roomId, displayName, asHost })
 
   const { toasts, push, dismiss } = useToasts()
-  const [chatText, setChatText] = useState('')
   const [copied, setCopied] = useState(false)
   const [showReactions, setShowReactions] = useState(false)
   const [stickerPack, setStickerPack] = useState<StickerPackId>('cute')
@@ -190,6 +208,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   }, [displayName, micOn, otherPeople, remotes, screenSharing, screenStream])
 
   const canAdminRecord = isHost && isHostLoggedIn()
+  const canManageChatExtras = canAdminRecord
   const {
     recording,
     elapsedLabel,
@@ -244,12 +263,6 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     setCopied(true)
     push('Đã copy link phòng', 'ok')
     setTimeout(() => setCopied(false), 1500)
-  }
-
-  const onSubmitChat = (e: FormEvent) => {
-    e.preventDefault()
-    void sendChat(chatText)
-    setChatText('')
   }
 
   const onMuteRemote = async (id: string, name: string) => {
@@ -455,7 +468,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 micOn={stage.micOn}
                 camOn
                 sharing
-                fit="contain"
+                fit="cover"
                 placeholder="Đang nhận màn hình…"
               />
               <ScreenStickerOverlay
@@ -489,58 +502,28 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
           <section className={`grid count-${Math.min(1 + otherPeople.length, 5)}`}>{peopleTiles}</section>
         )}
 
-        <aside className={`chat${showChat ? '' : ' collapsed'}`}>
-          <h2>
-            {showChat && <span>Chat</span>}
-            <span className="chat-controls">
-              <button
-                type="button"
-                className="chat-toggle"
-                onClick={() => setShowChat((v) => !v)}
-                title={showChat ? 'Thu gọn chat' : 'Mở chat'}
-                aria-label={showChat ? 'Thu gọn chat' : 'Mở chat'}
-              >
-                −
-              </button>
-              {showChat && (
-                <button
-                  type="button"
-                  className="chat-close"
-                  title="Đóng chat"
-                  aria-label="Đóng chat"
-                  onClick={() => setShowChat(false)}
-                >
-                  ×
-                </button>
-              )}
-            </span>
-          </h2>
-          {showChat && (
-            <>
-              <div className="chat-list">
-                {messages.length === 0 && <p className="muted">Chưa có tin nhắn</p>}
-                {messages.map((m) => (
-                  <div key={m.id} className="chat-item">
-                    <strong>{m.name}</strong>
-                    <span>{m.text}</span>
-                  </div>
-                ))}
-              </div>
-              <form onSubmit={onSubmitChat} className="chat-form">
-                <input
-                  value={chatText}
-                  onChange={(e) => setChatText(e.target.value)}
-                  placeholder="Nhắn gì đó..."
-                  maxLength={500}
-                />
-                <button type="submit" className="btn icon-btn" title="Gửi">
-                  <IconSend />
-                  <span>Gửi</span>
-                </button>
-              </form>
-            </>
-          )}
-        </aside>
+        <ChatPanel
+          open={showChat}
+          onToggle={() => setShowChat((v) => !v)}
+          onClose={() => setShowChat(false)}
+          userId={userId}
+          isHost={isHost}
+          canManageExtras={canManageChatExtras}
+          messages={messages}
+          pinnedMessages={pinnedMessages}
+          notes={chatNotes}
+          lessons={chatLessons}
+          materials={chatMaterials}
+          onSendChat={sendChat}
+          onPin={pinChatMessage}
+          onUnpin={unpinChatMessage}
+          onAddNote={addChatNote}
+          onRemoveNote={removeChatNote}
+          onAddLesson={addChatLesson}
+          onRemoveLesson={removeChatLesson}
+          onAddMaterial={addChatMaterial}
+          onRemoveMaterial={removeChatMaterial}
+        />
       </div>
 
       <footer className="controls">
@@ -635,9 +618,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               aria-label="Làm đẹp"
               disabled={!camOn}
             >
-              <span className="react-face" aria-hidden>
-                ✨
-              </span>
+              <IconBeauty />
               <span>Làm đẹp</span>
             </button>
             <button
@@ -684,9 +665,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 title="Ghim hộp học viên lên màn hình khi dạy"
                 aria-label="Hộp học viên"
               >
-                <span className="react-face" aria-hidden>
-                  👥
-                </span>
+                <IconPeople />
                 <span>{teachPip.open ? 'Đóng hộp' : 'Học viên'}</span>
               </button>
             )}
@@ -706,9 +685,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 title="Sticker trên màn share"
                 aria-label="Sticker"
               >
-                <span className="react-face" aria-hidden>
-                  🎀
-                </span>
+                <IconSticker />
                 <span>Sticker</span>
               </button>
             )}
@@ -721,9 +698,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 title="Xóa hết sticker trên màn hình"
                 aria-label="Xóa hết sticker"
               >
-                <span className="react-face" aria-hidden>
-                  🧹
-                </span>
+                <IconEraser />
                 <span>{screenStickers.length > 0 ? `Xóa (${screenStickers.length})` : 'Xóa sticker'}</span>
               </button>
             )}
@@ -740,9 +715,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               title="Reaction vui"
               aria-label="Reaction"
             >
-              <span className="react-face" aria-hidden>
-                😊
-              </span>
+              <IconReact />
               <span>React</span>
             </button>
             <button
@@ -758,9 +731,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
               title="Chọc ghẹo, tặng hoa, phê bình"
               aria-label="Chọc ghẹo"
             >
-              <span className="react-face" aria-hidden>
-                🎭
-              </span>
+              <IconPlayful />
               <span>Chọc</span>
             </button>
             {isHost && (
@@ -778,9 +749,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 title="Bình luận nhanh buổi học"
                 aria-label="Bình luận nhanh"
               >
-                <span className="react-face" aria-hidden>
-                  📢
-                </span>
+                <IconMegaphone />
                 <span>Nhanh</span>
               </button>
             )}

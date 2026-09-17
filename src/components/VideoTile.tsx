@@ -191,7 +191,7 @@ export function VideoTile({
       )}
 
       <div className="tile-meta">
-        <span>
+        <span className="tile-name">
           {label}
           {self ? ' (bạn)' : ''}
           {sharing ? ' · đang share' : ''}
