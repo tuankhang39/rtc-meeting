@@ -27,6 +27,8 @@ import { StarBoard } from './StarBoard'
 import { useTeachPip } from '../hooks/useTeachPip'
 import { useClassRecorder } from '../hooks/useClassRecorder'
 import { isHostLoggedIn } from '../lib/hostAuth'
+import { BeautyPanel } from './BeautyPanel'
+import { useBeautyFilter } from '../hooks/useBeautyFilter'
 import type { StickerPackId } from '../lib/stickers'
 
 type Props = {
@@ -64,6 +66,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     starFxByUser,
     toggleMic,
     toggleCam,
+    setBeautyTrack,
+    rawCameraTrack,
     toggleScreenShare,
     muteRemote,
     sendChat,
@@ -89,6 +93,13 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   const [showQuickComments, setShowQuickComments] = useState(false)
   const [showChat, setShowChat] = useState(true)
   const [showStars, setShowStars] = useState(false)
+  const [showBeauty, setShowBeauty] = useState(false)
+
+  const beauty = useBeautyFilter({
+    sourceTrack: rawCameraTrack,
+    camOn,
+    onOutputTrack: setBeautyTrack,
+  })
 
   useEffect(() => {
     unlockQuickAudio()
@@ -496,6 +507,16 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             }}
           />
         )}
+        {showBeauty && (
+          <BeautyPanel
+            settings={beauty.settings}
+            status={beauty.status}
+            error={beauty.error}
+            onChange={beauty.setSettings}
+            onReset={beauty.reset}
+            onClose={() => setShowBeauty(false)}
+          />
+        )}
         {showPlayfulPanel && (
           <PlayfulPicker
             participants={participants}
@@ -547,6 +568,26 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
             >
               {camOn ? <IconCam /> : <IconCamOff />}
               <span>{camOn ? 'Cam' : 'Cam off'}</span>
+            </button>
+            <button
+              type="button"
+              className={`btn control-btn ${showBeauty || beauty.active ? 'active-share' : ''}`}
+              onClick={() => {
+                setShowBeauty((v) => !v)
+                setShowReactions(false)
+                setShowStickerPanel(false)
+                setShowPlayfulPanel(false)
+                setShowQuickComments(false)
+                setShowStars(false)
+              }}
+              title="Làm đẹp camera"
+              aria-label="Làm đẹp"
+              disabled={!camOn}
+            >
+              <span className="react-face" aria-hidden>
+                ✨
+              </span>
+              <span>Làm đẹp</span>
             </button>
             <button
               type="button"
@@ -608,6 +649,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                   setShowPlayfulPanel(false)
                   setShowQuickComments(false)
                   setShowStars(false)
+                  setShowBeauty(false)
                   if (showStickerPanel) setSelectedSticker(null)
                 }}
                 title="Sticker trên màn share"

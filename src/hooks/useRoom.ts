@@ -134,6 +134,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [micOn, setMicOn] = useState(true)
   const [camOn, setCamOn] = useState(true)
+  const [rawCameraTrack, setRawCameraTrack] = useState<MediaStreamTrack | null>(null)
   const [status, setStatus] = useState<'connecting' | 'ready' | 'error'>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [mediaWarning, setMediaWarning] = useState<string | null>(null)
@@ -162,6 +163,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
   const remoteMediaRef = useRef<Map<string, RemoteMedia>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const cameraTrackRef = useRef<MediaStreamTrack | null>(null)
+  const beautyTrackRef = useRef<MediaStreamTrack | null>(null)
   const screenTrackRef = useRef<MediaStreamTrack | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenSharingRef = useRef(false)
@@ -341,7 +343,9 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
           },
           () => ({
             mic: localStreamRef.current?.getAudioTracks()[0] ?? null,
-            camera: camOnRef.current ? cameraTrackRef.current : null,
+            camera: camOnRef.current
+              ? (beautyTrackRef.current ?? cameraTrackRef.current)
+              : null,
             screen: screenTrackRef.current,
           }),
         )
@@ -475,6 +479,7 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
         localStreamRef.current = media.stream
         setLocalStream(media.stream)
         cameraTrackRef.current = media.stream.getVideoTracks()[0] ?? null
+        setRawCameraTrack(cameraTrackRef.current)
         camOnRef.current = media.camera
         setMicOn(media.mic)
         setCamOn(media.camera)
@@ -870,6 +875,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
       screenTrackRef.current = null
       screenStreamRef.current = null
       cameraTrackRef.current = null
+      beautyTrackRef.current = null
+      setRawCameraTrack(null)
       void remove(ref(db, `rooms/${roomId}/participants/${userId}`))
         .then(() => markRoomEmptyIfNeeded(roomId))
       void remove(ref(db, `rooms/${roomId}/signals/${userId}`))
@@ -958,18 +965,35 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     [roomId, userId],
   )
 
+  const refreshLocalPreview = useCallback(() => {
+    const raw = localStreamRef.current
+    if (!raw) return
+    const audio = raw.getAudioTracks()
+    const video = camOnRef.current
+      ? (beautyTrackRef.current ?? cameraTrackRef.current)
+      : null
+    setLocalStream(new MediaStream(video ? [...audio, video] : [...audio]))
+  }, [])
+
+  const setBeautyTrack = useCallback(
+    (track: MediaStreamTrack | null) => {
+      beautyTrackRef.current = track
+      meshRef.current?.syncLocalTracks()
+      refreshLocalPreview()
+    },
+    [refreshLocalPreview],
+  )
+
   const toggleCam = useCallback(async () => {
-    const stream = localStreamRef.current
-    if (!stream) return
+    if (!localStreamRef.current) return
     const next = !camOn
-    stream.getVideoTracks().forEach((t) => {
-      if (t !== screenTrackRef.current) t.enabled = next
-    })
+    if (cameraTrackRef.current) cameraTrackRef.current.enabled = next
     camOnRef.current = next
     setCamOn(next)
     meshRef.current?.syncLocalTracks()
+    refreshLocalPreview()
     await update(ref(getDb(), `rooms/${roomId}/participants/${userId}`), { camera: next })
-  }, [camOn, roomId, userId])
+  }, [camOn, refreshLocalPreview, roomId, userId])
 
   const sendChat = useCallback(
     async (text: string) => {
@@ -1137,6 +1161,8 @@ export function useRoom({ roomId, displayName, asHost = false }: UseRoomOptions)
     starFxByUser,
     toggleMic,
     toggleCam,
+    setBeautyTrack,
+    rawCameraTrack,
     toggleScreenShare,
     muteRemote,
     sendChat,
