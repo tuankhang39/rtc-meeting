@@ -509,11 +509,8 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         )}
         {showBeauty && (
           <BeautyPanel
-            settings={beauty.settings}
-            status={beauty.status}
-            error={beauty.error}
-            onChange={beauty.setSettings}
-            onReset={beauty.reset}
+            presetId={beauty.presetId}
+            onSelect={beauty.setPresetId}
             onClose={() => setShowBeauty(false)}
           />
         )}
@@ -580,14 +577,14 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 setShowQuickComments(false)
                 setShowStars(false)
               }}
-              title="Làm đẹp camera"
-              aria-label="Làm đẹp"
+              title="Filter camera"
+              aria-label="Filter"
               disabled={!camOn}
             >
               <span className="react-face" aria-hidden>
                 ✨
               </span>
-              <span>Làm đẹp</span>
+              <span>Filter</span>
             </button>
             <button
               type="button"

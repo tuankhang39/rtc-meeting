@@ -1,125 +1,40 @@
-import type { BeautySettings } from './types'
-import { beautyActive, beautyNeedsAi } from './types'
-
-const FACE_MESH_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619'
-const ASSETS_BASE = '/openmakeup'
-const MEDIAPIPE_BASE = FACE_MESH_CDN
+import { filterActive, getFilterPreset, type FilterPresetId } from './presets'
 
 export type BeautyEngineStatus = 'idle' | 'loading' | 'running' | 'error'
 
-type SegProcessor = {
-  createProcessedTrack: (t: MediaStreamTrack) => Promise<MediaStreamTrack>
-  setBackgroundMode: (m: 'blur' | 'none' | 'color' | 'image') => void
-  setBlurRadius: (n: number) => void
-  destroy?: () => void | Promise<void>
-}
-
-let scriptsReady: Promise<void> | null = null
-
-function loadScript(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector(`script[data-beauty-src="${src}"]`)
-    if (existing) {
-      resolve()
-      return
-    }
-    const s = document.createElement('script')
-    s.src = src
-    s.async = true
-    s.dataset.beautySrc = src
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error(`Không tải được ${src}`))
-    document.head.appendChild(s)
-  })
-}
-
-function ensureMediaPipeScripts() {
-  if (!scriptsReady) {
-    scriptsReady = (async () => {
-      await loadScript(`${FACE_MESH_CDN}/face_mesh.js`)
-      await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js')
-      if (!(window as unknown as { FaceMesh?: unknown }).FaceMesh) {
-        throw new Error('MediaPipe FaceMesh không sẵn sàng')
-      }
-    })()
-  }
-  return scriptsReady
-}
-
-/** Camera giả: dùng track có sẵn, không gọi getUserMedia (tránh mở cam lần 2). */
-class ExternalFrameCamera {
-  video: HTMLVideoElement
-  private onFrame: () => Promise<void> | void
-  private raf = 0
-  private alive = false
-
-  constructor(video: HTMLVideoElement, opts: { onFrame: () => Promise<void> | void }) {
-    this.video = video
-    this.onFrame = opts.onFrame
-  }
-
-  async start() {
-    this.alive = true
-    const tick = async () => {
-      if (!this.alive) return
-      this.raf = requestAnimationFrame(() => void tick())
-      if (this.video.readyState >= 2) {
-        try {
-          await this.onFrame()
-        } catch {
-          /* frame lỗi — bỏ qua */
-        }
-      }
-    }
-    void tick()
-  }
-
-  stop() {
-    this.alive = false
-    if (this.raf) cancelAnimationFrame(this.raf)
-    this.raf = 0
-  }
-}
-
-function mixHex(a: string, b: string, t: number) {
-  const parse = (h: string) => {
-    const n = h.replace('#', '')
-    const full = n.length === 3 ? n.split('').map((c) => c + c).join('') : n
-    const v = Number.parseInt(full, 16)
-    return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 }
-  }
-  const A = parse(a)
-  const B = parse(b)
-  const r = Math.round(A.r + (B.r - A.r) * t)
-  const g = Math.round(A.g + (B.g - A.g) * t)
-  const bl = Math.round(A.b + (B.b - A.b) * t)
-  return `#${[r, g, bl].map((x) => x.toString(16).padStart(2, '0')).join('')}`
-}
-
+/**
+ * Filter nhẹ: Canvas 2D + CSS filter.
+ * Preset "Tự nhiên": mịn nhẹ + sáng vừa + nâng vùng đỏ (môi).
+ */
 export class BeautyEngine {
-  private host: HTMLDivElement | null = null
-  private video: HTMLVideoElement | null = null
-  private canvas: HTMLCanvasElement | null = null
-  private makeup: {
-    init: () => Promise<unknown>
-    setAR: (type: string, color: string, mode: string) => void
-    clearPart: (type: string) => void
-    clearAll: () => void
-    stop: () => void
-    dispose: () => void
-    start: () => void
-  } | null = null
-  private seg: SegProcessor | null = null
-  private segTrack: MediaStreamTrack | null = null
+  private video = document.createElement('video')
+  private canvas = document.createElement('canvas')
+  private softCanvas = document.createElement('canvas')
+  private workCanvas = document.createElement('canvas')
+  private ctx: CanvasRenderingContext2D
+  private softCtx: CanvasRenderingContext2D
+  private workCtx: CanvasRenderingContext2D
   private out: MediaStream | null = null
   private outTrack: MediaStreamTrack | null = null
-  private source: MediaStreamTrack | null = null
-  private settings: BeautySettings
+  private presetId: FilterPresetId = 'none'
+  private raf = 0
+  private frame = 0
+  private running = false
   private onStatus: ((s: BeautyEngineStatus, err?: string) => void) | null = null
   private onTrack: ((t: MediaStreamTrack | null) => void) | null = null
 
-  constructor(settings: BeautySettings) {
-    this.settings = { ...settings }
+  constructor(presetId: FilterPresetId = 'none') {
+    this.presetId = presetId
+    const ctx = this.canvas.getContext('2d', { willReadFrequently: true })
+    const softCtx = this.softCanvas.getContext('2d')
+    const workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx || !softCtx || !workCtx) throw new Error('Canvas 2D không khả dụng')
+    this.ctx = ctx
+    this.softCtx = softCtx
+    this.workCtx = workCtx
+    this.video.playsInline = true
+    this.video.muted = true
+    this.video.autoplay = true
   }
 
   setStatusHandler(fn: (s: BeautyEngineStatus, err?: string) => void) {
@@ -138,219 +53,131 @@ export class BeautyEngine {
     return this.outTrack
   }
 
-  updateSettings(next: BeautySettings) {
-    const prevMode = this.modeKey(this.settings)
-    this.settings = { ...next }
-    const nextMode = this.modeKey(this.settings)
-    this.applyLooks()
-
-    if (prevMode !== nextMode && this.source) {
-      const src = this.source
-      void this.start(src).catch((e) => {
-        this.setStatus('error', e instanceof Error ? e.message : 'Lỗi beauty')
-      })
-      return
-    }
-    void this.syncBlurOnly()
-  }
-
-  private modeKey(s: BeautySettings) {
-    const makeup = s.lipstick > 0 || s.smooth > 0 || s.whiten > 0 ? 'm' : '-'
-    const blur = s.blurBg > 0 ? 'b' : '-'
-    return `${makeup}${blur}`
-  }
-
-  async ensureAiFor(settings: BeautySettings) {
-    this.settings = { ...settings }
-    if (!beautyNeedsAi(settings) && settings.smooth === 0 && settings.whiten === 0) return
-    // Models tải trong start / syncBlur
-    if (settings.blurBg > 0 && !this.seg) await this.ensureSegmo()
-    if ((settings.lipstick > 0 || settings.smooth > 0 || settings.whiten > 0) && !this.makeup) {
-      // start() sẽ tạo makeup; ở đây chỉ báo loading
-      this.setStatus('loading')
-    }
+  setPreset(id: FilterPresetId) {
+    this.presetId = id
   }
 
   async start(source: MediaStreamTrack): Promise<MediaStreamTrack> {
-    const src = source
     await this.stop()
-    if (!beautyActive(this.settings)) throw new Error('Chưa bật hiệu ứng nào')
+    if (!filterActive(this.presetId)) throw new Error('Chưa chọn filter')
 
-    this.source = src
-    this.setStatus('loading')
+    this.video.srcObject = new MediaStream([source])
+    await this.video.play().catch(() => {})
 
-    try {
-      const needsMakeup =
-        this.settings.lipstick > 0 || this.settings.smooth > 0 || this.settings.whiten > 0
-      const needsBlur = this.settings.blurBg > 0
-
-      let feedTrack = src
-      if (needsBlur) {
-        await this.ensureSegmo()
-        feedTrack = await this.startSegmo(src)
-      }
-
-      if (needsMakeup) {
-        await ensureMediaPipeScripts()
-        await this.startMakeup(feedTrack)
-        this.out = this.canvas!.captureStream(24)
-        this.outTrack = this.out.getVideoTracks()[0] ?? null
-      } else {
-        this.outTrack = feedTrack
-        this.out = new MediaStream([feedTrack])
-      }
-
-      if (!this.outTrack) throw new Error('Không tạo được track beauty')
-      this.applyLooks()
-      this.setStatus('running')
-      this.onTrack?.(this.outTrack)
-      return this.outTrack
-    } catch (e) {
-      this.setStatus('error', e instanceof Error ? e.message : 'Lỗi beauty')
-      await this.stop()
-      throw e
+    for (let i = 0; i < 30 && this.video.videoWidth < 2; i++) {
+      await new Promise((r) => setTimeout(r, 40))
     }
+
+    const settings = source.getSettings()
+    const w = this.video.videoWidth || settings.width || 640
+    const h = this.video.videoHeight || settings.height || 480
+    this.resize(w, h)
+
+    const fps = Math.min(24, Math.max(15, Math.round(settings.frameRate || 24)))
+    this.out = this.canvas.captureStream(fps)
+    this.outTrack = this.out.getVideoTracks()[0] ?? null
+    if (!this.outTrack) throw new Error('Không tạo được track filter')
+
+    this.running = true
+    this.setStatus('running')
+    this.onTrack?.(this.outTrack)
+    this.loop()
+    return this.outTrack
   }
 
-  private async ensureSegmo() {
-    if (this.seg) return
-    const { SegmentationProcessor } = await import('segmo')
-    this.seg = new SegmentationProcessor({
-      backgroundMode: 'blur',
-      blurRadius: 12,
-      useWorker: true,
-    })
-  }
-
-  private async startSegmo(source: MediaStreamTrack) {
-    if (!this.seg) await this.ensureSegmo()
-    const radius = Math.round(6 + (this.settings.blurBg / 100) * 18)
-    this.seg!.setBackgroundMode(this.settings.blurBg > 0 ? 'blur' : 'none')
-    this.seg!.setBlurRadius(radius)
-    this.segTrack = await this.seg!.createProcessedTrack(source)
-    return this.segTrack
-  }
-
-  private async syncBlurOnly() {
-    if (!this.seg || !this.source) return
-    if (this.settings.blurBg <= 0) {
-      this.seg.setBackgroundMode('none')
-      return
-    }
-    this.seg.setBackgroundMode('blur')
-    this.seg.setBlurRadius(Math.round(6 + (this.settings.blurBg / 100) * 18))
-  }
-
-  private async startMakeup(feedTrack: MediaStreamTrack) {
-    const { MakeupEngine } = await import('open-makeup-sdk')
-
-    this.host = document.createElement('div')
-    this.host.setAttribute('aria-hidden', 'true')
-    const w = feedTrack.getSettings().width || 640
-    const h = feedTrack.getSettings().height || 480
-    this.host.style.cssText = `position:fixed;left:-10000px;top:0;width:${w}px;height:${h}px;overflow:hidden;pointer-events:none;opacity:0;`
-
-    this.video = document.createElement('video')
-    this.video.playsInline = true
-    this.video.muted = true
-    this.video.autoplay = true
-    this.video.style.cssText = 'width:100%;height:100%;object-fit:cover;'
-    this.video.srcObject = new MediaStream([feedTrack])
-
-    this.canvas = document.createElement('canvas')
+  private resize(w: number, h: number) {
     this.canvas.width = w
     this.canvas.height = h
-    this.canvas.style.cssText = 'width:100%;height:100%;'
-
-    this.host.append(this.video, this.canvas)
-    document.body.appendChild(this.host)
-
-    await this.video.play().catch(() => {})
-    for (let i = 0; i < 40 && this.video.videoWidth < 2; i++) {
-      await new Promise((r) => setTimeout(r, 50))
-    }
-
-    const engine = new MakeupEngine({
-      video: this.video,
-      renderCanvas: this.canvas,
-      assetsBaseUrl: ASSETS_BASE,
-      mediapipeBaseUrl: MEDIAPIPE_BASE,
-      camera: { width: w, height: h },
-      faceMeshClass: (window as unknown as { FaceMesh: new (c: unknown) => unknown }).FaceMesh,
-      cameraClass: ExternalFrameCamera as unknown as new (
-        v: HTMLVideoElement,
-        o: { onFrame: () => Promise<void> | void },
-      ) => unknown,
-    })
-
-    await engine.init()
-    this.makeup = engine
+    this.softCanvas.width = w
+    this.softCanvas.height = h
+    // half-res cho mịn + nâng đỏ — nhẹ CPU
+    this.workCanvas.width = Math.max(160, Math.round(w / 2))
+    this.workCanvas.height = Math.max(90, Math.round(h / 2))
   }
 
-  private applyLooks() {
-    if (!this.makeup) return
-    const { smooth, whiten, lipstick, lipstickColor } = this.settings
+  private loop = () => {
+    if (!this.running) return
+    this.raf = requestAnimationFrame(this.loop)
+    this.frame++
+    if (this.video.readyState < 2) return
 
-    if (smooth > 0 || whiten > 0) {
-      // Foundation: màu sáng hơn khi trắng; finish matte (mode 1)
-      const base = '#f3d4c4'
-      const light = '#ffe8dc'
-      const t = Math.min(1, (whiten / 100) * 0.85 + (smooth / 100) * 0.25)
-      const color = mixHex(base, light, t)
-      this.makeup.setAR('foundation', color, smooth > 55 ? '5' : '1')
-    } else {
-      this.makeup.clearPart('foundation')
+    if (
+      this.video.videoWidth > 0 &&
+      (this.video.videoWidth !== this.canvas.width || this.video.videoHeight !== this.canvas.height)
+    ) {
+      this.resize(this.video.videoWidth, this.video.videoHeight)
     }
 
-    if (lipstick > 0) {
-      const soft = mixHex('#c98a8a', lipstickColor, 0.35 + (lipstick / 100) * 0.65)
-      // mode 7 = soft shine — tự nhiên hơn opaque
-      this.makeup.setAR('lipstick', soft, lipstick > 70 ? '5' : '7')
-    } else {
-      this.makeup.clearPart('lipstick')
+    const preset = getFilterPreset(this.presetId)
+    if (preset.mode === 'beauty') {
+      this.drawNatural(preset.css)
+      return
     }
+
+    this.ctx.filter = preset.css === 'none' ? 'none' : preset.css
+    this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height)
+    this.ctx.filter = 'none'
+  }
+
+  /** Mịn nhẹ + sáng vừa + môi/má đỏ hơn một chút */
+  private drawNatural(css: string) {
+    const w = this.canvas.width
+    const h = this.canvas.height
+
+    // 1) Base sáng nhẹ (không cháy)
+    this.ctx.filter = css
+    this.ctx.drawImage(this.video, 0, 0, w, h)
+    this.ctx.filter = 'none'
+
+    // 2) Lớp mịn: blur nhẹ phủ ~28% → da trông mịn, vẫn giữ nét
+    this.softCtx.filter = 'blur(2.2px)'
+    this.softCtx.drawImage(this.video, 0, 0, w, h)
+    this.softCtx.filter = 'none'
+    this.ctx.globalAlpha = 0.28
+    this.ctx.drawImage(this.softCanvas, 0, 0)
+    this.ctx.globalAlpha = 1
+
+    // 3) Nâng vùng đỏ (môi / má hồng) — half-res mỗi 2 frame
+    if (this.frame % 2 === 0) this.boostReds()
+  }
+
+  private boostReds() {
+    const sw = this.workCanvas.width
+    const sh = this.workCanvas.height
+    this.workCtx.drawImage(this.canvas, 0, 0, sw, sh)
+    const img = this.workCtx.getImageData(0, 0, sw, sh)
+    const d = img.data
+
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i]!
+      const g = d[i + 1]!
+      const b = d[i + 2]!
+      // Vùng đỏ hơn (môi, má): R vượt G/B rõ
+      const redBias = r - Math.max(g, b)
+      if (redBias < 18 || r < 70) continue
+      // Độ mạnh theo “đỏ bao nhiêu” — tối đa ~12%
+      const t = Math.min(1, (redBias - 18) / 55)
+      const lift = 6 + t * 18
+      d[i] = Math.min(255, r + lift)
+      d[i + 1] = Math.max(0, g - lift * 0.12)
+      d[i + 2] = Math.max(0, b - lift * 0.18)
+    }
+
+    this.workCtx.putImageData(img, 0, 0)
+    this.ctx.globalAlpha = 0.55
+    this.ctx.drawImage(this.workCanvas, 0, 0, this.canvas.width, this.canvas.height)
+    this.ctx.globalAlpha = 1
   }
 
   async stop() {
-    try {
-      this.makeup?.stop()
-      this.makeup?.dispose()
-    } catch {
-      /* ignore */
-    }
-    this.makeup = null
-
+    this.running = false
+    if (this.raf) cancelAnimationFrame(this.raf)
+    this.raf = 0
     this.outTrack?.stop()
-    this.out?.getTracks().forEach((t) => {
-      if (t !== this.source && t !== this.segTrack) t.stop()
-    })
+    this.out?.getTracks().forEach((t) => t.stop())
     this.out = null
     this.outTrack = null
-
-    if (this.segTrack && this.segTrack !== this.source) {
-      try {
-        this.segTrack.stop()
-      } catch {
-        /* ignore */
-      }
-    }
-    this.segTrack = null
-
-    if (this.seg?.destroy) {
-      try {
-        await this.seg.destroy()
-      } catch {
-        /* ignore */
-      }
-    }
-    this.seg = null
-
-    if (this.video) this.video.srcObject = null
-    this.host?.remove()
-    this.host = null
-    this.video = null
-    this.canvas = null
-    this.source = null
+    this.video.srcObject = null
     this.onTrack?.(null)
     this.setStatus('idle')
   }

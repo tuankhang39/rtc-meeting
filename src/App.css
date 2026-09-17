@@ -1411,53 +1411,66 @@
   line-height: 1.35;
 }
 
-.beauty-status {
-  margin: 0;
-  font-size: 0.78rem;
+.beauty-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.beauty-preset-btn {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 8px 4px;
+  border-radius: 12px;
+  border: 1px solid rgba(200, 150, 170, 0.28);
+  background: #fff;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.beauty-preset-btn.active {
+  border-color: var(--accent-deep, #c07a96);
+  box-shadow: 0 0 0 2px rgba(192, 122, 150, 0.28);
   color: var(--accent-deep);
 }
 
-.beauty-error {
-  color: #b42318;
+.beauty-preset-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: linear-gradient(135deg, #ddd, #bbb);
 }
 
-.beauty-row {
-  display: grid;
-  gap: 4px;
+.beauty-swatch-none {
+  background: linear-gradient(135deg, #f5f5f5, #d0d0d0);
 }
-
-.beauty-row-label {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text);
+.beauty-swatch-natural {
+  background: linear-gradient(135deg, #ffe4ec, #f2c4b0);
 }
-
-.beauty-row-label em {
-  font-style: normal;
-  color: var(--muted);
-  font-weight: 600;
+.beauty-swatch-soft {
+  background: linear-gradient(135deg, #ffe8ef, #f0d4c8);
 }
-
-.beauty-row input[type='range'] {
-  width: 100%;
-  accent-color: var(--accent-deep, #c07a96);
+.beauty-swatch-warm {
+  background: linear-gradient(135deg, #ffd7a8, #e8a070);
 }
-
-.beauty-color-row {
-  grid-template-columns: 1fr auto;
-  align-items: center;
+.beauty-swatch-cool {
+  background: linear-gradient(135deg, #c8e4ff, #8eb6e8);
 }
-
-.beauty-color-row input[type='color'] {
-  width: 42px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid rgba(200, 150, 170, 0.35);
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
+.beauty-swatch-bright {
+  background: linear-gradient(135deg, #fff6d6, #ffe08a);
+}
+.beauty-swatch-vivid {
+  background: linear-gradient(135deg, #ff8ab8, #7ad0ff);
+}
+.beauty-swatch-vintage {
+  background: linear-gradient(135deg, #e8d5b5, #c4a882);
+}
+.beauty-swatch-bw {
+  background: linear-gradient(135deg, #eee, #333);
 }
 
 .beauty-actions {
@@ -1468,6 +1481,12 @@
 [data-theme='dark'] .beauty-panel {
   background: rgba(22, 26, 32, 0.96);
   border-color: rgba(148, 163, 184, 0.25);
+}
+
+[data-theme='dark'] .beauty-preset-btn {
+  background: rgba(30, 36, 44, 0.95);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
 }
 
 .playful-picker-title {

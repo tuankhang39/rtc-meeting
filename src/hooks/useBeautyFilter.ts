@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BeautyEngine, type BeautyEngineStatus } from '../lib/beauty/engine'
-import {
-  beautyActive,
-  beautyNeedsAi,
-  DEFAULT_BEAUTY,
-  type BeautySettings,
-} from '../lib/beauty/types'
+import { filterActive, type FilterPresetId } from '../lib/beauty/presets'
 
 type Args = {
   sourceTrack: MediaStreamTrack | null
@@ -13,45 +8,34 @@ type Args = {
   onOutputTrack: (track: MediaStreamTrack | null) => void
 }
 
-/**
- * Lifecycle ổn định: queue tuần tự + debounce slider,
- * không stop engine khi chỉ đổi mức filter.
- */
 export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
-  const [settings, setSettingsState] = useState<BeautySettings>(DEFAULT_BEAUTY)
+  const [presetId, setPresetId] = useState<FilterPresetId>('none')
   const [status, setStatus] = useState<BeautyEngineStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
   const engineRef = useRef<BeautyEngine | null>(null)
-  const settingsRef = useRef(settings)
-  settingsRef.current = settings
+  const presetRef = useRef(presetId)
+  presetRef.current = presetId
   const onOutputRef = useRef(onOutputTrack)
   onOutputRef.current = onOutputTrack
   const sourceRef = useRef(sourceTrack)
   sourceRef.current = sourceTrack
   const camOnRef = useRef(camOn)
   camOnRef.current = camOn
-  const debounceRef = useRef(0)
   const chainRef = useRef(Promise.resolve())
   const unmountedRef = useRef(false)
 
-  const setSettings = useCallback((patch: Partial<BeautySettings>) => {
-    setSettingsState((prev) => ({ ...prev, ...patch }))
-  }, [])
-
-  const reset = useCallback(() => {
-    setSettingsState(DEFAULT_BEAUTY)
-  }, [])
+  const reset = useCallback(() => setPresetId('none'), [])
 
   const syncEngine = useCallback(() => {
     chainRef.current = chainRef.current.then(async () => {
       if (unmountedRef.current) return
 
-      const s = settingsRef.current
+      const id = presetRef.current
       const src = sourceRef.current
       const cam = camOnRef.current
 
-      if (!cam || !src || src.readyState !== 'live' || !beautyActive(s)) {
+      if (!cam || !src || src.readyState !== 'live' || !filterActive(id)) {
         const eng = engineRef.current
         engineRef.current = null
         if (eng) await eng.stop()
@@ -64,11 +48,9 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
       }
 
       try {
-        if (beautyNeedsAi(s)) setStatus('loading')
-
         let eng = engineRef.current
         if (!eng) {
-          eng = new BeautyEngine(s)
+          eng = new BeautyEngine(id)
           eng.setStatusHandler((st, err) => {
             if (unmountedRef.current) return
             setStatus(st)
@@ -83,8 +65,7 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
           if (unmountedRef.current) return
           onOutputRef.current(out)
         } else {
-          await eng.ensureAiFor(s)
-          eng.updateSettings(s)
+          eng.setPreset(id)
           let out = eng.getOutputTrack()
           if (!out || out.readyState !== 'live') {
             out = await eng.start(src)
@@ -111,19 +92,12 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
 
   useEffect(() => {
     void syncEngine()
-  }, [sourceTrack, camOn, syncEngine])
-
-  useEffect(() => {
-    window.clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(() => syncEngine(), 100)
-    return () => window.clearTimeout(debounceRef.current)
-  }, [settings, syncEngine])
+  }, [sourceTrack, camOn, presetId, syncEngine])
 
   useEffect(() => {
     unmountedRef.current = false
     return () => {
       unmountedRef.current = true
-      window.clearTimeout(debounceRef.current)
       const eng = engineRef.current
       engineRef.current = null
       void eng?.stop()
@@ -132,11 +106,11 @@ export function useBeautyFilter({ sourceTrack, camOn, onOutputTrack }: Args) {
   }, [])
 
   return {
-    settings,
-    setSettings,
+    presetId,
+    setPresetId,
     reset,
     status,
     error,
-    active: beautyActive(settings),
+    active: filterActive(presetId),
   }
 }
