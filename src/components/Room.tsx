@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { BRAND_SHORT } from '../lib/brand'
 import { useRoom } from '../hooks/useRoom'
 import { MAX_PARTICIPANTS } from '../lib/webrtc'
@@ -33,6 +33,7 @@ import { StarBoard } from './StarBoard'
 import { ChatPanel } from './ChatPanel'
 import { useTeachPip } from '../hooks/useTeachPip'
 import { useClassRecorder } from '../hooks/useClassRecorder'
+import { useActiveSpeakers } from '../hooks/useActiveSpeakers'
 import { isHostLoggedIn } from '../lib/hostAuth'
 import { BeautyPanel } from './BeautyPanel'
 import { useBeautyFilter } from '../hooks/useBeautyFilter'
@@ -207,6 +208,14 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     }
   }, [displayName, micOn, otherPeople, remotes, screenSharing, screenStream])
 
+  // Khung share co theo đúng tỉ lệ màn hình được share: không cắt mép, và sticker/nét vẽ
+  // (toạ độ %) nằm trên nội dung thật nên ai xem ở cỡ cửa sổ nào cũng trùng chỗ.
+  const [stageAspect, setStageAspect] = useState(16 / 9)
+  const onStageVideoSize = (w: number, h: number) => {
+    const next = w / h
+    setStageAspect((prev) => (Math.abs(prev - next) < 0.01 ? prev : next))
+  }
+
   const canAdminRecord = isHost && isHostLoggedIn()
   const canManageChatExtras = canAdminRecord
   const {
@@ -270,54 +279,61 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     push(`Đã tắt mic của ${name}`, 'ok')
   }
 
+  const speakerTargets = useMemo(() => {
+    return [
+      { id: userId, audioStream: localStream, micOn, isHost, joinedAt: 0 },
+      ...otherPeople.map((r) => ({
+        id: r.userId,
+        audioStream: r.stream,
+        micOn: r.mic,
+        isHost: r.isHost,
+        joinedAt: r.joinedAt,
+      })),
+    ]
+  }, [userId, localStream, micOn, isHost, otherPeople])
+
+  const { sortPeople } = useActiveSpeakers(speakerTargets)
+
   const pipPeople = useMemo(() => {
-    const remotes = [...otherPeople]
-      .sort((a, b) => {
-        if (a.isHost && !b.isHost) return -1
-        if (!a.isHost && b.isHost) return 1
-        return a.joinedAt - b.joinedAt
-      })
-      .map((r) => ({
+    const list = [
+      {
+        id: userId,
+        stream: localStream,
+        label: displayName,
+        micOn,
+        camOn,
+        isHostUser: isHost,
+        mirror: true,
+        self: true,
+        pinned: false,
+        stars: starScores[userId]?.count ?? 0,
+        joinedAt: 0,
+      },
+      ...otherPeople.map((r) => ({
         id: r.userId,
         stream: r.camStream,
         label: r.name,
         micOn: r.mic,
         camOn: r.camera,
         isHostUser: r.isHost,
-        pinned: r.isHost,
+        pinned: false,
         stars: starScores[r.userId]?.count ?? 0,
-      }))
+        joinedAt: r.joinedAt,
+      })),
+    ]
 
-    // Giáo viên đang share: luôn ghim cam của mình lên đầu thanh Học viên
-    if (isHost && screenSharing) {
-      return [
-        {
-          id: userId,
-          stream: localStream,
-          label: displayName,
-          micOn,
-          camOn,
-          isHostUser: true,
-          mirror: true,
-          self: true,
-          pinned: true,
-          stars: starScores[userId]?.count ?? 0,
-        },
-        ...remotes,
-      ]
-    }
-
-    return remotes
+    // Ai phát ra âm thanh thì hiện lên trên
+    return sortPeople(list)
   }, [
     otherPeople,
     starScores,
     isHost,
-    screenSharing,
     userId,
     localStream,
     displayName,
     micOn,
     camOn,
+    sortPeople,
   ])
 
   const teachPip = useTeachPip(pipPeople, {
@@ -360,7 +376,81 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
     )
   }
 
-  const peopleTiles = (
+  const stageTiles = (
+    <>
+      {sortPeople([
+        {
+          id: userId,
+          stream: localStream,
+          audioStream: localStream,
+          muted: true,
+          mirror: true,
+          self: true,
+          isHostUser: isHost,
+          label: displayName,
+          micOn,
+          camOn,
+          sharing: screenSharing,
+          playfulEffects: playfulByUser[userId] ?? [],
+          stars: starScores[userId]?.count ?? 0,
+          starBurst: Boolean(starFxByUser[userId]?.length),
+          canMute: false,
+          canStar: false,
+          onMute: undefined,
+          onStar: undefined,
+          onTakeStar: undefined,
+          joinedAt: 0,
+        },
+        ...otherPeople.map((r) => ({
+          id: r.userId,
+          stream: r.camStream,
+          audioStream: r.stream,
+          muted: false,
+          mirror: false,
+          self: false,
+          isHostUser: r.isHost,
+          label: r.connecting ? `${r.name} · đang kết nối` : r.name,
+          micOn: r.mic,
+          camOn: r.camera,
+          sharing: r.sharing,
+          playfulEffects: playfulByUser[r.userId] ?? [],
+          stars: starScores[r.userId]?.count ?? 0,
+          starBurst: Boolean(starFxByUser[r.userId]?.length),
+          canMute: isHost && !r.isHost,
+          canStar: isHost,
+          onMute: () => void onMuteRemote(r.userId, r.name),
+          onStar: () => void giveStar(r.userId, r.name),
+          onTakeStar: () => void takeStar(r.userId, r.name),
+          joinedAt: r.joinedAt,
+        })),
+      ]).map((p) => (
+        <VideoTile
+          key={p.id}
+          stream={p.stream}
+          audioStream={p.audioStream}
+          muted={p.muted}
+          mirror={p.mirror}
+          self={p.self}
+          isHostUser={p.isHostUser}
+          compact
+          label={p.label}
+          micOn={p.micOn}
+          camOn={p.camOn}
+          sharing={p.sharing}
+          playfulEffects={p.playfulEffects}
+          stars={p.stars}
+          starBurst={p.starBurst}
+          canMute={p.canMute}
+          onMute={p.onMute}
+          canStar={p.canStar}
+          onStar={p.onStar}
+          onTakeStar={p.onTakeStar}
+        />
+      ))}
+    </>
+  )
+
+  const gridTiles = (
     <>
       <VideoTile
         stream={localStream}
@@ -369,7 +459,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         mirror
         self
         isHostUser={isHost}
-        compact={Boolean(stage)}
+        compact={false}
         label={displayName}
         micOn={micOn}
         camOn={camOn}
@@ -379,26 +469,26 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         starBurst={Boolean(starFxByUser[userId]?.length)}
       />
       {otherPeople.map((r) => (
-          <VideoTile
-            key={r.userId}
-            stream={r.camStream}
-            audioStream={r.stream}
-            compact={Boolean(stage)}
-            label={r.connecting ? `${r.name} · đang kết nối` : r.name}
-            micOn={r.mic}
-            camOn={r.camera}
-            sharing={r.sharing}
-            isHostUser={r.isHost}
-            canMute={isHost && !r.isHost}
-            onMute={() => void onMuteRemote(r.userId, r.name)}
-            playfulEffects={playfulByUser[r.userId] ?? []}
-            stars={starScores[r.userId]?.count ?? 0}
-            canStar={isHost}
-            onStar={() => void giveStar(r.userId, r.name)}
-            onTakeStar={() => void takeStar(r.userId, r.name)}
-            starBurst={Boolean(starFxByUser[r.userId]?.length)}
-          />
-        ))}
+        <VideoTile
+          key={r.userId}
+          stream={r.camStream}
+          audioStream={r.stream}
+          compact={false}
+          label={r.connecting ? `${r.name} · đang kết nối` : r.name}
+          micOn={r.mic}
+          camOn={r.camera}
+          sharing={r.sharing}
+          isHostUser={r.isHost}
+          canMute={isHost && !r.isHost}
+          onMute={() => void onMuteRemote(r.userId, r.name)}
+          playfulEffects={playfulByUser[r.userId] ?? []}
+          stars={starScores[r.userId]?.count ?? 0}
+          canStar={isHost}
+          onStar={() => void giveStar(r.userId, r.name)}
+          onTakeStar={() => void takeStar(r.userId, r.name)}
+          starBurst={Boolean(starFxByUser[r.userId]?.length)}
+        />
+      ))}
     </>
   )
 
@@ -436,7 +526,10 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
       <header className="room-bar">
         <div>
           <strong className="brand">{BRAND_SHORT}</strong>
-          <span className="muted"> / {roomName ? `${roomName} · ${roomId}` : roomId}</span>
+          <span className="muted">
+            {' / '}
+            {!roomName ? roomId : roomName.toLowerCase().includes(roomId.toLowerCase()) ? roomName : `${roomName} · ${roomId}`}
+          </span>
           {isHost && <span className="pill host-pill">Host</span>}
           {recording && (
             <span className="pill record-pill" title="Đang ghi màn hình máy (local)">
@@ -460,6 +553,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
         {stage ? (
           <section className="stage-layout">
             <div className="stage-main stage-with-stickers">
+              <div className="stage-frame" style={{ '--stage-ar': stageAspect } as CSSProperties}>
               <VideoTile
                 stream={stage.stream}
                 audioStream={screenSharing ? localStream : undefined}
@@ -468,8 +562,9 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 micOn={stage.micOn}
                 camOn
                 sharing
-                fit="cover"
+                fit="contain"
                 placeholder="Đang nhận màn hình…"
+                onVideoSize={onStageVideoSize}
               />
               <ScreenStickerOverlay
                 stickers={screenStickers}
@@ -484,6 +579,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 onClear={handleClearStickers}
               />
               <ScreenDrawOverlay strokes={drawStrokes} board={drawBoard} />
+              </div>
               {showStickerPanel && (
                 <StickerPackPicker
                   packId={stickerPack}
@@ -496,10 +592,10 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 />
               )}
             </div>
-            <aside className="stage-people">{peopleTiles}</aside>
+            <aside className="stage-people">{stageTiles}</aside>
           </section>
         ) : (
-          <section className={`grid count-${Math.min(1 + otherPeople.length, 5)}`}>{peopleTiles}</section>
+          <section className={`grid count-${Math.min(1 + otherPeople.length, 5)}`}>{gridTiles}</section>
         )}
 
         <ChatPanel

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useSpeaking } from '../hooks/useSpeaking'
 import { useVideoStream } from '../hooks/useVideoStream'
+import { onTick } from '../lib/sharedTicker'
 import type { PlayfulEffect } from '../lib/playful'
 import { PlayfulOverlay } from './PlayfulInteractions'
 import { IconMicOff } from './Icons'
@@ -29,6 +30,8 @@ type Props = {
   playfulEffects?: PlayfulEffect[]
   /** Hiện thay avatar khi chưa có hình (dùng cho khung màn hình đang share). */
   placeholder?: string
+  /** Báo kích thước thật của video (để khung ngoài co theo đúng tỉ lệ). */
+  onVideoSize?: (width: number, height: number) => void
 }
 
 export function VideoTile({
@@ -53,6 +56,7 @@ export function VideoTile({
   starBurst = false,
   playfulEffects = [],
   placeholder,
+  onVideoSize,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -60,6 +64,24 @@ export function VideoTile({
   const speaking = useSpeaking(speakFrom, micOn)
 
   const painted = useVideoStream(videoRef, stream)
+
+  const onVideoSizeRef = useRef(onVideoSize)
+  onVideoSizeRef.current = onVideoSize
+  const wantsSize = Boolean(onVideoSize)
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el || !wantsSize) return
+    const report = () => {
+      if (el.videoWidth > 0 && el.videoHeight > 0) onVideoSizeRef.current?.(el.videoWidth, el.videoHeight)
+    }
+    report()
+    el.addEventListener('loadedmetadata', report)
+    el.addEventListener('resize', report)
+    return () => {
+      el.removeEventListener('loadedmetadata', report)
+      el.removeEventListener('resize', report)
+    }
+  }, [wantsSize, stream])
 
   useEffect(() => {
     const el = audioRef.current
@@ -70,7 +92,7 @@ export function VideoTile({
     const hasLiveAudio = () => Boolean(src?.getAudioTracks().some((t) => t.readyState === 'live'))
 
     const play = () => {
-      if (!hasLiveAudio()) return
+      if (!el.paused || !hasLiveAudio()) return
       void el.play().catch(() => {})
     }
 
@@ -79,7 +101,7 @@ export function VideoTile({
     document.addEventListener('pointerdown', play)
     document.addEventListener('keydown', play)
     document.addEventListener('visibilitychange', play)
-    const timer = window.setInterval(play, 2000)
+    const stopTick = onTick(2000, play)
 
     const onAdd = () => play()
     src?.addEventListener('addtrack', onAdd)
@@ -88,7 +110,7 @@ export function VideoTile({
       document.removeEventListener('pointerdown', play)
       document.removeEventListener('keydown', play)
       document.removeEventListener('visibilitychange', play)
-      window.clearInterval(timer)
+      stopTick()
       src?.removeEventListener('addtrack', onAdd)
     }
   }, [audioStream, muted, stream])

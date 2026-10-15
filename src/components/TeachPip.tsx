@@ -67,12 +67,16 @@ function StripTile({
         'teach-strip-tile',
         speaking ? 'is-speaking' : '',
         showVideo ? '' : 'cam-off',
-        person.pinned || person.isHostUser ? 'is-pinned' : '',
+        person.pinned ? 'is-pinned' : '',
       ]
         .filter(Boolean)
         .join(' ')}
     >
-      {(person.pinned || person.isHostUser) && <span className="teach-strip-pin">Ghim · Host</span>}
+      {person.pinned ? (
+        <span className="teach-strip-pin">{person.isHostUser ? 'Ghim · Host' : 'Ghim'}</span>
+      ) : person.isHostUser ? (
+        <span className="teach-strip-pin">Host</span>
+      ) : null}
       <video
         ref={videoRef}
         autoPlay

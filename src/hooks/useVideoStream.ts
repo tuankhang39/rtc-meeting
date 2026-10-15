@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react'
+import { onTick } from '../lib/sharedTicker'
 
 const TRACK_EVENTS = ['unmute', 'mute', 'ended'] as const
 const TICK_MS = 700
@@ -44,6 +45,7 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
     }
 
     let blank = 0
+    let lastPlaying: boolean | null = null
     const tick = () => {
       watchNewTracks()
       const node = ref.current
@@ -51,7 +53,11 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
       if (node.srcObject !== stream) node.srcObject = stream
 
       const painted = node.videoWidth > 0
-      setPlaying(painted && hasVideoTrack())
+      const nowPlaying = painted && hasVideoTrack()
+      if (nowPlaying !== lastPlaying) {
+        lastPlaying = nowPlaying
+        setPlaying(nowPlaying)
+      }
 
       if (!hasVideoTrack()) {
         blank = 0
@@ -93,10 +99,10 @@ export function useVideoStream(ref: RefObject<HTMLVideoElement | null>, stream: 
     view?.addEventListener('focus', kick)
 
     tick()
-    const timer = window.setInterval(tick, TICK_MS)
+    const stopTick = onTick(TICK_MS, tick)
 
     return () => {
-      window.clearInterval(timer)
+      stopTick()
       for (const track of watched) {
         for (const name of TRACK_EVENTS) track.removeEventListener(name, kick)
       }

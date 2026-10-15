@@ -31,4 +31,4 @@ export const BRAND_NAME = 'Cuộc họp của Xiao Xin Laoshi'
 export const BRAND_SHORT = 'Xiao Xin Laoshi'
 export const BRAND_TAGLINE = 'Học không giới hạn, làm bạn Tiếng Trung'
 export const BRAND_DESC =
-  'Họp video 2–3 người. Ai cũng vào được bằng Room ID — tạo phòng cần đăng nhập host → Học không giới hạn, làm bạn Tiếng Trung'
+  'Họp video tối đa 5 người. Ai cũng vào được bằng Room ID — tạo phòng cần đăng nhập host → Học không giới hạn, làm bạn Tiếng Trung'

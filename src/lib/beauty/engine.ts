@@ -135,6 +135,9 @@ export class BeautyEngine {
   private brow: BrowOptions = { ...DEFAULT_BROW }
   private raf = 0
   private frame = 0
+  /** Khoảng cách giữa hai lần vẽ, khớp fps của captureStream. */
+  private frameInterval = 1000 / 24
+  private lastDrawAt = 0
   private running = false
   private face: FaceLandmarker | null = null
   private smoothLips: Array<{ x: number; y: number }> | null = null
@@ -233,6 +236,8 @@ export class BeautyEngine {
     // Beauty nặng hơn → 18fps; CSS filter giữ cao hơn
     const wantFps = preset.mode === 'beauty' ? 18 : 24
     const fps = Math.min(wantFps, Math.max(15, Math.round(settings.frameRate || wantFps)))
+    this.frameInterval = 1000 / fps
+    this.lastDrawAt = 0
     this.out = this.canvas.captureStream(fps)
     this.outTrack = this.out.getVideoTracks()[0] ?? null
     if (!this.outTrack) throw new Error('Không tạo được track filter')
@@ -257,11 +262,18 @@ export class BeautyEngine {
     this.workCanvas.height = Math.max(68, Math.round(h / 3.2))
   }
 
-  private loop = () => {
+  private loop = (now: number = performance.now()) => {
     if (!this.running) return
     this.raf = requestAnimationFrame(this.loop)
-    this.frame++
     if (this.video.readyState < 2) return
+
+    // rAF chạy theo tần số màn hình (60–144Hz) nhưng stream chỉ gửi `fps` khung/giây:
+    // vẽ thêm chỉ đốt CPU/GPU cho frame bị bỏ. Giữ phần dư để không tụt xuống
+    // bội số của nhịp màn hình (vd 18fps trên 60Hz thành 15fps).
+    const elapsed = now - this.lastDrawAt
+    if (elapsed < this.frameInterval) return
+    this.lastDrawAt = elapsed > this.frameInterval * 2 ? now : now - (elapsed % this.frameInterval)
+    this.frame++
 
     if (
       this.video.videoWidth > 0 &&
@@ -288,8 +300,8 @@ export class BeautyEngine {
     this.ctx.filter = 'none'
     this.ctx.drawImage(this.video, 0, 0, w, h)
 
-    // Detect mỗi 2 frame; frame còn lại lerp bám landmark
-    if (this.face && this.frame % 2 === 0) {
+    // Loop đã giới hạn theo fps đầu ra nên detect mỗi frame được vẽ; lerp làm mượt rung landmark
+    if (this.face) {
       try {
         const res = this.face.detectForVideo(this.video, performance.now())
         const lm = res.faceLandmarks?.[0]
