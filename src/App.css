@@ -558,8 +558,10 @@
   border-top: 1px solid var(--line);
   background: var(--bar-bg);
   max-width: 100%;
-  /* KHÔNG hidden: các panel (Làm đẹp, React, Chọc, Sao...) bật lên phía trên thanh này */
+  /* Popup (làm đẹp / react / chọc / bình luận / sao) nổi lên trên footer */
   overflow: visible;
+  position: relative;
+  z-index: 50;
   flex-shrink: 0;
   min-width: 0;
 }
@@ -783,7 +785,7 @@
   background: rgba(255, 252, 253, 0.97);
   box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
   animation: rise 0.25s ease both;
-  z-index: 20;
+  z-index: 50;
 }
 
 .star-board-title {
@@ -1354,9 +1356,6 @@
   padding: 0 2px;
 }
 
-.controls {
-  position: relative;
-}
 
 .react-face {
   font-size: 1.2rem;
@@ -1376,7 +1375,7 @@
   background: rgba(255, 252, 253, 0.96);
   box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
   animation: rise 0.25s ease both;
-  z-index: 20;
+  z-index: 50;
 }
 
 .reaction-chip {
@@ -1459,7 +1458,7 @@
   background: rgba(255, 252, 253, 0.98);
   box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
   animation: rise 0.25s ease both;
-  z-index: 20;
+  z-index: 50;
 }
 
 .quick-comment-title {
@@ -1527,7 +1526,7 @@
   background: rgba(255, 252, 253, 0.98);
   box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
   animation: rise 0.25s ease both;
-  z-index: 20;
+  z-index: 50;
 }
 
 .beauty-panel {
@@ -1544,7 +1543,7 @@
   background: rgba(255, 252, 253, 0.98);
   box-shadow: 0 10px 24px rgba(120, 70, 95, 0.16);
   animation: rise 0.25s ease both;
-  z-index: 20;
+  z-index: 50;
   display: grid;
   gap: 10px;
 }
@@ -2291,7 +2290,7 @@
   position: absolute;
   left: 12px;
   bottom: 12px;
-  z-index: 8;
+  z-index: 40;
   width: min(340px, calc(100% - 24px));
   padding: 10px;
   border-radius: 16px;
