@@ -3037,16 +3037,20 @@
    Màu sáng chỉ áp cho theme hồng; dark mode chỉ đổi những gì cần.
    ===================================================================== */
 
-.room {
-  position: relative;
-  isolation: isolate;
+/* Nền pattern gấu cho cả app (biến đặt trên .app-shell trong App.tsx) */
+.app-shell {
   background-image: var(--bear-pattern);
   background-size: 220px 220px;
   background-repeat: repeat;
 }
 
-[data-theme='dark'] .room {
+[data-theme='dark'] .app-shell {
   background-image: var(--bear-pattern-dark);
+}
+
+.room {
+  position: relative;
+  isolation: isolate;
 }
 
 .room > .room-bar,
@@ -3389,4 +3393,509 @@
 
 .tile-meta .tile-name {
   flex: 0 1 auto;
+}
+
+/* =====================================================================
+   Chủ đề gấu — trang chủ, trang quản lý, nút/ô nhập dùng chung.
+   Rule màu sáng bọc trong :where() để specificity thấp, không đè nút trong room.
+   ===================================================================== */
+
+.bear-art {
+  display: inline-block;
+  line-height: 0;
+}
+
+.bear-art svg {
+  display: block;
+}
+
+/* ---------- Sticker góc màn hình ---------- */
+.cute-stickers .sticker {
+  opacity: 0.85;
+  filter: drop-shadow(0 6px 12px rgba(150, 80, 110, 0.16));
+}
+
+[data-theme='dark'] .cute-stickers .sticker {
+  opacity: 0.3;
+  filter: none;
+}
+
+/* ---------- Gấu ngó lên mép thẻ ---------- */
+.peek-bear {
+  --peek-size: 92px;
+  position: absolute;
+  left: 50%;
+  top: calc(var(--peek-size) * -0.66);
+  z-index: 3;
+  width: var(--peek-size);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.peek-bear-face {
+  display: block;
+  height: calc(var(--peek-size) * 0.7);
+  overflow: hidden;
+  filter: drop-shadow(0 -2px 6px rgba(150, 80, 110, 0.12));
+  animation: peek-bob 3.6s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+.peek-bear-paw {
+  position: absolute;
+  bottom: calc(var(--peek-size) * -0.08);
+  width: calc(var(--peek-size) * 0.27);
+  height: calc(var(--peek-size) * 0.2);
+  border-radius: 50% 50% 45% 45%;
+  background: var(--peek-fur, #d29b66);
+  box-shadow:
+    0 0 0 1.5px rgba(107, 58, 82, 0.15),
+    0 3px 6px rgba(150, 80, 110, 0.18);
+}
+
+/* vạch ngón chân */
+.peek-bear-paw::before {
+  content: '';
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  top: 18%;
+  height: 34%;
+  background:
+    linear-gradient(rgba(107, 58, 82, 0.28), rgba(107, 58, 82, 0.28)) 30% 0 / 1.5px 100% no-repeat,
+    linear-gradient(rgba(107, 58, 82, 0.28), rgba(107, 58, 82, 0.28)) 70% 0 / 1.5px 100% no-repeat;
+}
+
+.peek-bear-paw.left {
+  left: 4%;
+  transform: rotate(-8deg);
+}
+
+.peek-bear-paw.right {
+  right: 4%;
+  transform: rotate(8deg);
+}
+
+@keyframes peek-bob {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  40% { transform: translateY(-3px) rotate(-3deg); }
+  60% { transform: translateY(-3px) rotate(3deg); }
+}
+
+/* ---------- Thẻ (lobby, modal, admin login) ---------- */
+.lobby {
+  padding-top: 72px;
+}
+
+.lobby-card,
+.modal-card,
+.admin-login {
+  position: relative;
+  border-radius: 32px;
+}
+
+/* đường khâu kiểu gấu bông bên trong thẻ */
+.lobby-card::after,
+.modal-card::after,
+.admin-login::after,
+.admin-create::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border: 2px dashed rgba(216, 137, 166, 0.32);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.admin-create {
+  position: relative;
+}
+
+[data-theme='dark'] .lobby-card::after,
+[data-theme='dark'] .modal-card::after,
+[data-theme='dark'] .admin-login::after,
+[data-theme='dark'] .admin-create::after {
+  border-color: rgba(142, 197, 232, 0.18);
+}
+
+:root:not([data-theme='dark']) .lobby-card,
+:root:not([data-theme='dark']) .modal-card,
+:root:not([data-theme='dark']) .admin-login {
+  border: 2px solid #fff;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 1.5px rgba(216, 137, 166, 0.35),
+    0 22px 50px rgba(150, 80, 110, 0.16);
+}
+
+.lobby-card {
+  padding: 44px 36px 32px;
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  margin-top: 56px;
+}
+
+.admin-login {
+  margin-top: calc(12vh + 40px);
+  padding: 40px 30px 30px;
+}
+
+.lobby-card > *,
+.modal-card > *,
+.admin-login > * {
+  position: relative;
+  z-index: 1;
+}
+
+.lobby-card > .peek-bear,
+.modal-card > .peek-bear,
+.admin-login > .peek-bear {
+  position: absolute;
+  z-index: 3;
+}
+
+/* sticker nhỏ ở hai góc dưới thẻ */
+.card-sticker {
+  line-height: 0;
+}
+
+.lobby-card > .card-sticker {
+  position: absolute;
+  z-index: 3;
+}
+
+.card-sticker-l {
+  top: auto;
+  bottom: -18px;
+  left: -16px;
+}
+
+.card-sticker-r {
+  top: auto;
+  bottom: -14px;
+  right: -14px;
+}
+
+.brand-hero,
+.lobby-card .eyebrow,
+.lobby-card .lede {
+  text-align: center;
+}
+
+.lobby-card .lede {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+:root:not([data-theme='dark']) .brand-hero-main {
+  background: linear-gradient(135deg, #e07aa0, #b56b88 55%, #c98fb8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lobby-actions {
+  justify-content: center;
+}
+
+.modal-card .lobby-actions,
+.admin-login .lobby-actions {
+  justify-content: flex-start;
+}
+
+/* ---------- Nút dùng chung ---------- */
+.btn.icon-btn {
+  justify-content: center;
+}
+
+.btn.icon-btn svg {
+  flex-shrink: 0;
+}
+
+:where(:root:not([data-theme='dark'])) .btn {
+  border: 1px solid rgba(216, 137, 166, 0.32);
+  background: #fff;
+  color: var(--accent-deep);
+  box-shadow: 0 3px 0 rgba(181, 107, 136, 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
+}
+
+:where(:root:not([data-theme='dark'])) .btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 rgba(181, 107, 136, 0.18);
+}
+
+:where(:root:not([data-theme='dark'])) .btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 rgba(181, 107, 136, 0.18);
+}
+
+:where(:root:not([data-theme='dark'])) .btn.primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #e8a3bc, #c97795);
+  color: #fff;
+  box-shadow:
+    0 4px 0 #a9587a,
+    0 10px 20px rgba(150, 80, 110, 0.2);
+}
+
+:where(:root:not([data-theme='dark'])) .btn.primary:hover:not(:disabled) {
+  box-shadow:
+    0 6px 0 #a9587a,
+    0 12px 22px rgba(150, 80, 110, 0.22);
+}
+
+:where(:root:not([data-theme='dark'])) .btn.primary:active:not(:disabled) {
+  box-shadow: 0 1px 0 #a9587a;
+}
+
+:where(:root:not([data-theme='dark'])) .btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:where(:root:not([data-theme='dark'])) .btn.ghost:hover:not(:disabled) {
+  background: rgba(216, 137, 166, 0.12);
+  box-shadow: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Ô nhập ---------- */
+:where(:root:not([data-theme='dark'])) .lobby-form input,
+:where(:root:not([data-theme='dark'])) .modal-card input,
+:where(:root:not([data-theme='dark'])) .admin-login input,
+:where(:root:not([data-theme='dark'])) .admin-create input,
+:where(:root:not([data-theme='dark'])) .admin-create textarea {
+  border: 2px solid rgba(216, 137, 166, 0.25);
+  border-radius: 16px;
+  background: #fffafc;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+:where(:root:not([data-theme='dark'])) .lobby-form input:focus,
+:where(:root:not([data-theme='dark'])) .modal-card input:focus,
+:where(:root:not([data-theme='dark'])) .admin-login input:focus,
+:where(:root:not([data-theme='dark'])) .admin-create input:focus,
+:where(:root:not([data-theme='dark'])) .admin-create textarea:focus {
+  border-color: #d889a6;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(216, 137, 166, 0.18);
+}
+
+.admin-login input:focus,
+.admin-create input:focus,
+.admin-create textarea:focus {
+  outline: none;
+}
+
+/* ---------- Theme toggle ---------- */
+:where(:root:not([data-theme='dark'])) .theme-toggle {
+  border: 1px solid rgba(216, 137, 166, 0.32);
+  background: #fff;
+  box-shadow: 0 3px 0 rgba(181, 107, 136, 0.16);
+}
+
+.theme-toggle svg {
+  flex-shrink: 0;
+}
+
+/* ---------- Banner ---------- */
+.banner {
+  border-radius: 16px;
+  font-weight: 700;
+}
+
+:where(:root:not([data-theme='dark'])) .banner.ok {
+  background: #fdeef4;
+  border: 1px dashed rgba(216, 137, 166, 0.55);
+}
+
+/* ---------- Trang quản lý ---------- */
+.admin-page {
+  padding-top: 28px;
+}
+
+.admin-bar {
+  align-items: center;
+  padding: 14px 18px;
+  border-radius: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 28px var(--shadow);
+  backdrop-filter: blur(8px);
+}
+
+.admin-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-bar-title .eyebrow {
+  margin-bottom: 2px;
+}
+
+.admin-bar-bear {
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 8px rgba(150, 80, 110, 0.2));
+  animation: brand-bear-wave 3.2s ease-in-out infinite;
+  transform-origin: 50% 90%;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:where(:root:not([data-theme='dark'])) .admin-tabs {
+  background: #fff;
+  border-color: rgba(216, 137, 166, 0.3);
+  box-shadow: 0 4px 14px rgba(150, 80, 110, 0.08);
+}
+
+:where(:root:not([data-theme='dark'])) .admin-tab.on {
+  background: linear-gradient(135deg, #e8a3bc, #c97795);
+  box-shadow: 0 3px 0 #a9587a;
+}
+
+.admin-create {
+  padding: 22px 24px;
+  border-radius: 26px;
+}
+
+:where(:root:not([data-theme='dark'])) .admin-create {
+  border: 2px solid #fff;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 1.5px rgba(216, 137, 166, 0.3),
+    0 14px 34px rgba(150, 80, 110, 0.1);
+}
+
+.admin-create > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (min-width: 760px) {
+  .admin-create {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+    align-items: start;
+  }
+
+  .admin-create .btn {
+    align-self: end;
+    min-height: 46px;
+  }
+}
+
+.admin-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.admin-room-card {
+  --card-a: #fde8ef;
+  --card-b: #f3c2d2;
+  position: relative;
+  overflow: hidden;
+  padding: 0 16px 14px;
+  border-radius: 24px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+:where(:root:not([data-theme='dark'])) .admin-room-card {
+  border: 2px solid #fff;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 0 0 1.5px rgba(216, 137, 166, 0.28),
+    0 12px 28px rgba(150, 80, 110, 0.12);
+}
+
+.admin-room-card:hover {
+  transform: translateY(-4px);
+}
+
+.admin-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -16px 6px;
+  padding: 14px 16px 12px;
+  background: radial-gradient(circle at 18% 30%, var(--card-a), var(--card-b));
+}
+
+[data-theme='dark'] .admin-card-head {
+  background: linear-gradient(160deg, #222a35, #1a2029);
+}
+
+.admin-card-bear {
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 6px rgba(150, 80, 110, 0.22));
+  transition: transform 0.25s ease;
+}
+
+.admin-room-card:hover .admin-card-bear {
+  transform: rotate(-10deg) scale(1.08);
+}
+
+.admin-card-heading {
+  min-width: 0;
+}
+
+.admin-card-heading h2 {
+  margin: 0;
+}
+
+:where(:root:not([data-theme='dark'])) .admin-card-kicker {
+  color: var(--accent-deep);
+  opacity: 0.8;
+}
+
+.admin-card-id {
+  display: inline-block;
+  justify-self: start;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(216, 137, 166, 0.12);
+}
+
+.admin-card-delete:hover:not(:disabled) {
+  color: #c04a68;
+}
+
+.admin-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+.admin-empty p {
+  margin: 0;
+}
+
+.admin-empty-bear {
+  animation: peek-bob 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peek-bear-face,
+  .admin-bar-bear,
+  .admin-empty-bear {
+    animation: none;
+  }
+}
+
+.lobby-card > .sr-only {
+  position: absolute;
 }

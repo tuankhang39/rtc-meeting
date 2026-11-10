@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CuteStickers } from './components/CuteStickers'
+import { BEAR_THEME_VARS } from './components/BearDecor'
 import { AdminDashboard } from './components/AdminDashboard'
 import { Lobby } from './components/Lobby'
 import { Room } from './components/Room'
@@ -50,7 +51,7 @@ export default function App() {
   const isAdmin = path === '/admin' || path === '/dashboard'
 
   return (
-    <div className={`app-shell${session ? ' is-room' : ''}`}>
+    <div className={`app-shell${session ? ' is-room' : ''}`} style={BEAR_THEME_VARS}>
       <CuteStickers />
       <div className="app-content">
         {session ? (

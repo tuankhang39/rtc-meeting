@@ -5,6 +5,8 @@ import { isHostLoggedIn, loginHost, logoutHost } from '../lib/hostAuth'
 import { randomId } from '../lib/webrtc'
 import { unlockQuickAudio } from '../lib/quickAudio'
 import { ThemeToggle } from './ThemeToggle'
+import { BearArt, PeekBear } from './BearDecor'
+import { BearEnter, BearHouse, BearKey, BearPlus } from './BearIcons'
 
 type Props = {
   initialRoomId?: string
@@ -59,8 +61,9 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
     <div className="lobby">
       <ThemeToggle className="theme-toggle-float" />
       <div className="lobby-card">
-        <span className="card-sticker card-sticker-l">🍓</span>
-        <span className="card-sticker card-sticker-r">🧸</span>
+        <PeekBear kind="teddy" size={96} />
+        <BearArt kind="strawberry" size={54} className="card-sticker card-sticker-l" />
+        <BearArt kind="kitty" size={50} className="card-sticker card-sticker-r" />
         <p className="eyebrow">{BRAND_TAGLINE}</p>
         <h1 className="brand-hero">
           <span className="brand-hero-line">Cuộc họp của</span>
@@ -112,22 +115,25 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
             />
           </label>
           <div className="lobby-actions">
-            <button type="submit" className="btn primary" disabled={!configured || !roomId.trim()}>
+            <button type="submit" className="btn primary icon-btn" disabled={!configured || !roomId.trim()}>
+              <BearEnter />
               {hostOk ? 'Vào phòng (host)' : 'Vào phòng'}
             </button>
             {hostOk ? (
-              <button type="button" className="btn" disabled={!configured} onClick={createRoom}>
+              <button type="button" className="btn icon-btn" disabled={!configured} onClick={createRoom}>
+                <BearPlus size={16} />
                 Tạo phòng nhanh
               </button>
             ) : (
               <button
                 type="button"
-                className="btn"
+                className="btn icon-btn"
                 onClick={() => {
                   setShowLogin(true)
                   setLoginError(null)
                 }}
               >
+                <BearKey />
                 Đăng nhập
               </button>
             )}
@@ -135,8 +141,9 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
         </form>
 
         <p className="lobby-admin-link">
-          <button type="button" className="btn ghost tiny" onClick={onOpenAdmin}>
-            Trang quản lý /admin
+          <button type="button" className="btn ghost tiny icon-btn" onClick={onOpenAdmin}>
+            <BearHouse size={15} />
+            Trang quản lý phòng
           </button>
         </p>
       </div>
@@ -144,6 +151,7 @@ export function Lobby({ initialRoomId = '', onJoin, onOpenAdmin }: Props) {
       {showLogin && (
         <div className="modal-backdrop" onClick={() => setShowLogin(false)}>
           <form className="modal-card" onClick={(e) => e.stopPropagation()} onSubmit={onLogin}>
+            <PeekBear kind="kitty" size={80} />
             <p className="eyebrow">Host only</p>
             <h2>Đăng nhập</h2>
             <label>

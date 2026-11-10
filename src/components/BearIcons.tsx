@@ -265,6 +265,71 @@ export function BearEraser({ size = 22, className }: IconProps) {
   )
 }
 
+export function BearMoon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" {...SOFT} {...S} />
+      <path d="M17 3.5v3M15.5 5h3" {...S} strokeWidth={1.6} />
+    </svg>
+  )
+}
+
+export function BearFlower({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <g fill="currentColor" fillOpacity={0.35} stroke="currentColor" strokeWidth={1.6}>
+        <circle cx="12" cy="6.5" r="3.5" />
+        <circle cx="17.2" cy="10.3" r="3.5" />
+        <circle cx="15.2" cy="16.4" r="3.5" />
+        <circle cx="8.8" cy="16.4" r="3.5" />
+        <circle cx="6.8" cy="10.3" r="3.5" />
+      </g>
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function BearEnter({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M13 3.5h4.5A2.5 2.5 0 0 1 20 6v12a2.5 2.5 0 0 1-2.5 2.5H13" {...SOFT} {...S} />
+      <path d="M3.5 12H14m0 0-3.4-3.4M14 12l-3.4 3.4" {...S} />
+    </svg>
+  )
+}
+
+export function BearKey({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <circle cx="5.4" cy="6.2" r="1.8" fill="currentColor" />
+      <circle cx="12.6" cy="6.2" r="1.8" fill="currentColor" />
+      <circle cx="9" cy="11" r="5" {...SOFT} {...S} />
+      <path d="M12.6 14.6 20 22M17 19l2-2M15 17l1.5-1.5" {...S} />
+    </svg>
+  )
+}
+
+export function BearTrash({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <path d="M4 6.5h16M9.5 6.5V4.5h5v2" {...S} />
+      <path d="M6 6.5l1 12.5a2 2 0 0 0 2 1.5h6a2 2 0 0 0 2-1.5l1-12.5" {...SOFT} {...S} />
+      <path d="M10 10.5v6M14 10.5v6" {...S} strokeWidth={1.6} />
+    </svg>
+  )
+}
+
+export function BearHouse({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size, className)}>
+      <circle cx="6.5" cy="5.5" r="2" fill="currentColor" />
+      <circle cx="17.5" cy="5.5" r="2" fill="currentColor" />
+      <path d="M3.5 11 12 4.5l8.5 6.5V18a2.5 2.5 0 0 1-2.5 2.5H6A2.5 2.5 0 0 1 3.5 18z" {...SOFT} {...S} />
+      <path d="M10 20.5v-5a2 2 0 0 1 4 0v5" {...S} />
+    </svg>
+  )
+}
+
 export function BearCrown({ size = 12, className }: IconProps) {
   return (
     <svg {...base(size, className)}>

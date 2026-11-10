@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { applyTheme, getStoredTheme, toggleTheme, type AppTheme } from '../lib/brand'
+import { BearFlower, BearMoon } from './BearIcons'
 
 /** Theme lưu trong localStorage key `xiaoxin-theme` (`pink` | `dark`) */
 export function ThemeToggle({ className = '' }: { className?: string }) {
@@ -28,7 +29,7 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
       aria-label={theme === 'pink' ? 'Đổi sang Dark' : 'Đổi sang Pink'}
       onClick={() => setTheme((t) => toggleTheme(t))}
     >
-      <span aria-hidden>{theme === 'pink' ? '🌙' : '🌸'}</span>
+      {theme === 'pink' ? <BearMoon size={16} /> : <BearFlower size={16} />}
       <span>{theme === 'pink' ? 'Dark' : 'Pink'}</span>
     </button>
   )
