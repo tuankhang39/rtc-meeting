@@ -5,7 +5,6 @@ import { teachPipSize } from '../lib/teachPipStyles'
 import {
   canUseDocumentPip,
   copyStylesToWindow,
-  fitPipWindow,
   requestDocumentPip,
   syncPipTheme,
 } from '../lib/documentPip'
@@ -36,11 +35,6 @@ export function useTeachPip(people: TeachPipPerson[], dock: TeachPipDock) {
         onPanel={setPanel}
       />,
     )
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (winRef.current && !winRef.current.closed) fitPipWindow(winRef.current)
-      })
-    })
   }, [])
 
   const close = useCallback(() => {

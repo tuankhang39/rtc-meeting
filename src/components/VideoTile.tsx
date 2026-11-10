@@ -5,6 +5,8 @@ import { onTick } from '../lib/sharedTicker'
 import type { PlayfulEffect } from '../lib/playful'
 import { PlayfulOverlay } from './PlayfulInteractions'
 import { IconMicOff } from './Icons'
+import { BearCrown, BearMinus, BearPlus, BearStar } from './BearIcons'
+import { bearForId, bearSvg } from '../lib/bearArt'
 
 type Props = {
   stream: MediaStream | null
@@ -152,13 +154,22 @@ export function VideoTile({
               <span className="muted">Chờ hình từ người share</span>
             </div>
           ) : (
-            <div className="tile-avatar">{label.slice(0, 1).toUpperCase()}</div>
+            <div className={`tile-avatar bear-${bearForId(label)}`}>
+              {/* svg tĩnh sinh từ bearArt.ts, không chứa dữ liệu người dùng */}
+              <span className="tile-bear" dangerouslySetInnerHTML={{ __html: bearSvg(bearForId(label), 96) }} />
+              <span className="tile-initial">{label.slice(0, 1).toUpperCase()}</span>
+            </div>
           ))}
       </div>
 
       <PlayfulOverlay effects={playfulEffects} />
 
-      {isHostUser && <span className="host-badge">Host</span>}
+      {isHostUser && (
+        <span className="host-badge">
+          <BearCrown size={12} />
+          Host
+        </span>
+      )}
 
       <div className="tile-actions">
         {canStar && (
@@ -173,7 +184,7 @@ export function VideoTile({
                 onStar?.()
               }}
             >
-              +
+              <BearPlus size={14} />
             </button>
             <button
               type="button"
@@ -186,7 +197,7 @@ export function VideoTile({
                 onTakeStar?.()
               }}
             >
-              −
+              <BearMinus size={14} />
             </button>
           </>
         )}
@@ -219,7 +230,8 @@ export function VideoTile({
           {sharing ? ' · đang share' : ''}
         </span>
         <span className="tile-star-count" title={`${stars} sao`}>
-          ⭐ {stars}
+          <BearStar size={12} />
+          {stars}
         </span>
         <span className={`dot ${micOn ? (speaking ? 'speak' : 'on') : 'off'}`} title={micOn ? 'Mic on' : 'Mic off'} />
       </div>

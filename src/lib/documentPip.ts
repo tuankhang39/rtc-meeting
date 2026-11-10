@@ -1,4 +1,4 @@
-import { TEACH_PIP_CSS, TEACH_PIP_WIDTH, teachPipSize } from './teachPipStyles'
+import { TEACH_PIP_CSS, teachPipSize } from './teachPipStyles'
 
 type PipWindowOptions = {
   width?: number
@@ -49,21 +49,6 @@ export function copyStylesToWindow(target: Window) {
   }
   style.textContent = TEACH_PIP_CSS
   doc.body.className = 'teach-pip-body'
-}
-
-export function fitPipWindow(target: Window) {
-  const root = target.document.getElementById('teach-pip-root')
-  const box = (root?.firstElementChild as HTMLElement | null) ?? root
-  if (!box) return
-  const width = TEACH_PIP_WIDTH
-  const height = Math.ceil(box.getBoundingClientRect().height)
-  if (height < 80) return
-  if (target.innerHeight <= height + 8 && Math.abs(target.innerWidth - width) < 8) return
-  try {
-    target.resizeTo(width, height)
-  } catch {
-    /* ignore */
-  }
 }
 
 export function syncPipTheme(target: Window | null) {

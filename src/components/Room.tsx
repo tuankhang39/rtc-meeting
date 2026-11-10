@@ -18,8 +18,10 @@ import {
   IconRecord,
   IconScreen,
   IconScreenOff,
+  IconStar,
   IconSticker,
 } from './Icons'
+import { bearPatternSvg, bearSvg, svgDataUri } from '../lib/bearArt'
 import { ToastStack, useToasts } from './Toast'
 import { ReactionBar, ReactionBurst } from './Reactions'
 import { QuickCommentBar } from './QuickComments'
@@ -45,6 +47,17 @@ type Props = {
   asHost?: boolean
   onLeave: () => void
 }
+
+/* Nền + sticker gấu của room (svg tĩnh sinh từ bearArt.ts, không chứa dữ liệu người dùng). */
+const ROOM_BEAR_VARS = {
+  '--bear-pattern': svgDataUri(bearPatternSvg({ opacity: 0.16 })),
+  '--bear-pattern-dark': svgDataUri(
+    bearPatternSvg({ opacity: 0.08, paw: '#8ec5e8', heart: '#b8d9f0', star: '#e8d48e', bow: '#8ec5e8' }),
+  ),
+} as CSSProperties
+const ROOM_BEAR_A = bearSvg('strawberry', 120)
+const ROOM_BEAR_B = bearSvg('sleepy', 96)
+const BRAND_BEAR = bearSvg('brown', 26)
 
 export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   const {
@@ -519,12 +532,17 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
   }
 
   return (
-    <div className="room">
+    <div className="room" style={ROOM_BEAR_VARS}>
+      <div className="room-bears" aria-hidden>
+        <span className="room-bear room-bear-a" dangerouslySetInnerHTML={{ __html: ROOM_BEAR_A }} />
+        <span className="room-bear room-bear-b" dangerouslySetInnerHTML={{ __html: ROOM_BEAR_B }} />
+      </div>
       <ToastStack toasts={toasts} onDismiss={dismiss} />
       <ReactionBurst reactions={reactions} />
 
       <header className="room-bar">
         <div>
+          <span className="brand-bear" aria-hidden dangerouslySetInnerHTML={{ __html: BRAND_BEAR }} />
           <strong className="brand">{BRAND_SHORT}</strong>
           <span className="muted">
             {' / '}
@@ -863,9 +881,7 @@ export function Room({ roomId, displayName, asHost = false, onLeave }: Props) {
                 title="Tặng sao, xem điểm buổi học"
                 aria-label="Tặng sao"
               >
-                <span className="react-face" aria-hidden>
-                  ⭐
-                </span>
+                <IconStar size={22} />
                 <span>Sao</span>
               </button>
             )}

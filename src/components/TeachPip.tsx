@@ -2,7 +2,19 @@ import { useRef } from 'react'
 import { useSpeaking } from '../hooks/useSpeaking'
 import { useVideoStream } from '../hooks/useVideoStream'
 import { QUICK_COMMENTS, type QuickComment } from '../lib/quickComments'
-import { IconCam, IconCamOff, IconMic, IconMicOff, IconScreenOff } from './Icons'
+import { bearForId, bearPatternSvg, bearSvg, svgDataUri } from '../lib/bearArt'
+import {
+  BearCam,
+  BearChat,
+  BearCrown,
+  BearMic,
+  BearMinus,
+  BearPaw,
+  BearPin,
+  BearPlus,
+  BearStar,
+  BearStopShare,
+} from './BearIcons'
 
 export type TeachPipPerson = {
   id: string
@@ -44,6 +56,11 @@ type Props = {
   onPanel: (panel: 'quick' | 'star' | null) => void
 }
 
+function BearArt({ svg, className }: { svg: string; className?: string }) {
+  // svg là chuỗi tĩnh sinh từ bearArt.ts, không chứa dữ liệu người dùng.
+  return <span className={className} dangerouslySetInnerHTML={{ __html: svg }} />
+}
+
 function StripTile({
   person,
   canStar,
@@ -60,11 +77,13 @@ function StripTile({
   const painted = useVideoStream(videoRef, person.stream)
   const showVideo = person.camOn && painted
   const stars = person.stars ?? 0
+  const bear = bearForId(person.id || person.label)
 
   return (
     <div
       className={[
         'teach-strip-tile',
+        `bear-${bear}`,
         speaking ? 'is-speaking' : '',
         showVideo ? '' : 'cam-off',
         person.pinned ? 'is-pinned' : '',
@@ -72,11 +91,22 @@ function StripTile({
         .filter(Boolean)
         .join(' ')}
     >
-      {person.pinned ? (
-        <span className="teach-strip-pin">{person.isHostUser ? 'Ghim · Host' : 'Ghim'}</span>
-      ) : person.isHostUser ? (
-        <span className="teach-strip-pin">Host</span>
-      ) : null}
+      {(person.pinned || person.isHostUser) && (
+        <div className="teach-strip-badges">
+          {person.pinned && (
+            <span className="teach-strip-badge pin">
+              <BearPin size={11} />
+              Ghim
+            </span>
+          )}
+          {person.isHostUser && (
+            <span className="teach-strip-badge host">
+              <BearCrown size={11} />
+              Host
+            </span>
+          )}
+        </div>
+      )}
       <video
         ref={videoRef}
         autoPlay
@@ -87,32 +117,31 @@ function StripTile({
         controlsList="nodownload nofullscreen noremoteplayback noplaybackrate"
         className={person.mirror ? 'mirror' : ''}
       />
-      {!showVideo && <div className="teach-strip-avatar">{person.label.slice(0, 1).toUpperCase()}</div>}
+      {!showVideo && (
+        <div className="teach-strip-avatar">
+          <BearArt className="teach-strip-bear" svg={bearSvg(bear, 72)} />
+          <span className="teach-strip-initial">{person.label.slice(0, 1).toUpperCase()}</span>
+        </div>
+      )}
       <div className="teach-strip-meta">
         <div className="teach-strip-meta-left">
           <span className="teach-strip-name">
             {person.label}
             {person.self ? ' (bạn)' : ''}
           </span>
-          <span className="teach-strip-stars">⭐ {stars}</span>
+          <span className="teach-strip-stars">
+            <BearStar size={12} />
+            {stars}
+          </span>
         </div>
         <div className="teach-strip-meta-right">
           {!person.micOn && (
             <span className="teach-strip-mute" title="Mic tắt">
-              <IconMicOff size={14} />
+              <BearMic size={14} off />
             </span>
           )}
           {canStar && (
-            <>
-              <button
-                type="button"
-                className="teach-strip-star-btn"
-                title={`Tặng sao cho ${person.label}`}
-                aria-label={`Tặng sao ${person.label}`}
-                onClick={() => onGiveStar(person.id, person.label)}
-              >
-                +
-              </button>
+            <div className="teach-strip-star-group">
               <button
                 type="button"
                 className="teach-strip-star-btn take"
@@ -121,9 +150,18 @@ function StripTile({
                 disabled={stars <= 0}
                 onClick={() => onTakeStar(person.id, person.label)}
               >
-                −
+                <BearMinus size={12} />
               </button>
-            </>
+              <button
+                type="button"
+                className="teach-strip-star-btn give"
+                title={`Tặng sao cho ${person.label}`}
+                aria-label={`Tặng sao ${person.label}`}
+                onClick={() => onGiveStar(person.id, person.label)}
+              >
+                <BearPlus size={12} />
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -131,37 +169,50 @@ function StripTile({
   )
 }
 
+const PATTERN = svgDataUri(bearPatternSvg())
+
 export function TeachPipGrid({ people, dock, panel, onPanel }: Props) {
   return (
-    <div className="teach-pip">
+    <div className="teach-pip" style={{ backgroundImage: PATTERN }}>
       <div className="teach-pip-dock">
-        <button type="button" className={dock.micOn ? '' : 'off'} onClick={dock.onToggleMic}>
-          {dock.micOn ? <IconMic size={18} /> : <IconMicOff size={18} />}
-          {dock.micOn ? 'Mic' : 'Unmute'}
+        <button type="button" className={dock.micOn ? 'is-on' : 'off'} onClick={dock.onToggleMic}>
+          <span className="teach-pip-dock-ico">
+            <BearMic size={20} off={!dock.micOn} />
+          </span>
+          {dock.micOn ? 'Mic' : 'Bật mic'}
         </button>
-        <button type="button" className={dock.camOn ? '' : 'off'} onClick={dock.onToggleCam}>
-          {dock.camOn ? <IconCam size={18} /> : <IconCamOff size={18} />}
-          {dock.camOn ? 'Cam' : 'Cam off'}
+        <button type="button" className={dock.camOn ? 'is-on' : 'off'} onClick={dock.onToggleCam}>
+          <span className="teach-pip-dock-ico">
+            <BearCam size={20} off={!dock.camOn} />
+          </span>
+          {dock.camOn ? 'Cam' : 'Bật cam'}
         </button>
         <button type="button" className="stop" onClick={dock.onStopShare}>
-          <IconScreenOff size={18} />
+          <span className="teach-pip-dock-ico">
+            <BearStopShare size={20} />
+          </span>
           Dừng
         </button>
         {dock.isHost && (
           <button
             type="button"
-            className={panel === 'quick' ? 'on' : ''}
+            className={['wide', panel === 'quick' ? 'on' : ''].filter(Boolean).join(' ')}
             onClick={() => onPanel(panel === 'quick' ? null : 'quick')}
           >
-            <span>📢</span>
-            Nhanh
+            <span className="teach-pip-dock-ico">
+              <BearChat size={20} />
+            </span>
+            Nhắc nhanh
           </button>
         )}
       </div>
 
       <div className="teach-pip-stage">
         {people.length === 0 ? (
-          <div className="teach-pip-empty">Đang chờ học viên…</div>
+          <div className="teach-pip-empty">
+            <BearArt className="teach-pip-empty-bear" svg={bearSvg('sleepy', 84)} />
+            <span>Đang chờ học viên…</span>
+          </div>
         ) : (
           <div className="teach-pip-list">
             {people.map((p) => (
@@ -178,6 +229,10 @@ export function TeachPipGrid({ people, dock, panel, onPanel }: Props) {
 
         {dock.isHost && panel === 'quick' && (
           <div className="teach-pip-panel">
+            <div className="teach-pip-panel-head">
+              <BearPaw size={14} />
+              Nhắc nhanh
+            </div>
             {QUICK_COMMENTS.map((c) => (
               <button
                 key={c.id}
@@ -188,7 +243,7 @@ export function TeachPipGrid({ people, dock, panel, onPanel }: Props) {
                   onPanel(null)
                 }}
               >
-                <span>{c.emoji}</span>
+                <span className="teach-pip-chip-emoji">{c.emoji}</span>
                 {c.text}
               </button>
             ))}
